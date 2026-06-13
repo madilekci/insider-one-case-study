@@ -7,6 +7,7 @@ use App\Http\Requests\StoreNotificationRequest;
 use App\Http\Resources\NotificationResource;
 use App\Jobs\ProcessNotificationJob;
 use App\Models\Notification;
+use App\Services\Observability\Metrics;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -14,6 +15,10 @@ use Illuminate\Support\Str;
 
 class NotificationController extends Controller
 {
+    public function __construct(private Metrics $metrics)
+    {
+    }
+
     public function store(StoreNotificationRequest $request): JsonResponse
     {
         $data = $request->validated();
@@ -56,6 +61,8 @@ class NotificationController extends Controller
             'priority' => $data['priority'] ?? Notification::PRIORITY_NORMAL,
             'status' => Notification::STATUS_QUEUED,
         ]);
+
+        $this->metrics->incrementCreated($notification->channel);
 
         $this->dispatchForProcessing($notification);
 
@@ -128,6 +135,7 @@ class NotificationController extends Controller
 
         $notification->status = Notification::STATUS_CANCELLED;
         $notification->save();
+        $this->metrics->incrementCancelled();
 
         return response()->json([
             'notification' => new NotificationResource($notification),
@@ -155,6 +163,8 @@ class NotificationController extends Controller
             'priority' => $item['priority'] ?? Notification::PRIORITY_NORMAL,
             'status' => Notification::STATUS_QUEUED,
         ]);
+
+        $this->metrics->incrementCreated($notification->channel);
 
         $this->dispatchForProcessing($notification);
 

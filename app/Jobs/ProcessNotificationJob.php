@@ -6,6 +6,7 @@ use App\Models\Notification;
 use App\Services\Exceptions\PermanentProviderException;
 use App\Services\Exceptions\TransientProviderException;
 use App\Services\NotificationProviderClient;
+use App\Services\Observability\Metrics;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\RateLimiter;
@@ -29,7 +30,7 @@ class ProcessNotificationJob implements ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(NotificationProviderClient $providerClient): void
+    public function handle(NotificationProviderClient $providerClient, Metrics $metrics): void
     {
         $notification = Notification::query()->find($this->notificationId);
 
@@ -50,6 +51,7 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->status = Notification::STATUS_QUEUED;
             $notification->last_error = sprintf('Rate limit exceeded for channel: %s', $notification->channel);
             $notification->save();
+            $metrics->incrementRateLimited($notification->channel);
 
             $this->release((int) config('notifications.rate_limit.release_seconds', 1));
 
@@ -60,26 +62,42 @@ class ProcessNotificationJob implements ShouldQueue
         $notification->attempt_count = $this->attempts();
         $notification->save();
 
+        $startedAt = microtime(true);
+
         try {
             $providerResponse = $providerClient->send($notification);
+            $metrics->observeProviderRequest((int) round((microtime(true) - $startedAt) * 1000));
 
             $notification->status = Notification::STATUS_SENT;
             $notification->provider_response = $providerResponse;
             $notification->last_error = null;
             $notification->save();
+            $metrics->incrementSent();
         } catch (PermanentProviderException $e) {
+            $metrics->observeProviderRequest((int) round((microtime(true) - $startedAt) * 1000));
+            $metrics->incrementProviderPermanentFailure();
+            $metrics->incrementFailed();
+
             $notification->status = Notification::STATUS_FAILED;
             $notification->last_error = $e->getMessage();
             $notification->save();
 
             return;
         } catch (TransientProviderException $e) {
+            $metrics->observeProviderRequest((int) round((microtime(true) - $startedAt) * 1000));
+            $metrics->incrementProviderTransientFailure();
+            $metrics->incrementRetry();
+
             $notification->status = Notification::STATUS_QUEUED;
             $notification->last_error = $e->getMessage();
             $notification->save();
 
             throw $e;
         } catch (Throwable $e) {
+            $metrics->observeProviderRequest((int) round((microtime(true) - $startedAt) * 1000));
+            $metrics->incrementProviderTransientFailure();
+            $metrics->incrementRetry();
+
             $notification->status = Notification::STATUS_QUEUED;
             $notification->last_error = $e->getMessage();
             $notification->save();
@@ -113,6 +131,8 @@ class ProcessNotificationJob implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
+        app(Metrics::class)->incrementFailed();
+
         $notification = Notification::query()->find($this->notificationId);
 
         if (! $notification) {

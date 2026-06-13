@@ -39,6 +39,12 @@ Health check:
 curl -i http://localhost:8000/health
 ```
 
+Metrics snapshot:
+
+```bash
+curl -sS http://localhost:8000/metrics
+```
+
 Stop:
 
 ```bash
@@ -154,6 +160,21 @@ Configuration:
 ```bash
 NOTIFICATION_RATE_LIMIT_PER_SECOND=100
 NOTIFICATION_RATE_LIMIT_RELEASE_SECONDS=1
+```
+
+## Observability Metrics (Step 6-7)
+
+`/metrics` returns a JSON snapshot with:
+
+- Notification counters: `created_total`, `sent_total`, `failed_total`, `retry_total`, `rate_limited_total`
+- Per-channel counters: `created_by_channel`, `rate_limited_by_channel`
+- Provider counters: `request_total`, `transient_failure_total`, `permanent_failure_total`, `avg_latency_ms`
+- Queue depth gauges: `high`, `normal`, `low`
+
+Example:
+
+```bash
+curl -sS http://localhost:8000/metrics | jq .
 ```
 
 ## Example API Requests

@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\Jobs\ProcessNotificationJob;
 use App\Models\Notification;
 use App\Services\NotificationProviderClient;
+use App\Services\Observability\Metrics;
 use App\Services\Exceptions\TransientProviderException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -41,7 +42,7 @@ class ProcessNotificationJobTest extends TestCase
             'status' => Notification::STATUS_QUEUED,
         ]);
 
-        (new ProcessNotificationJob($notification->id))->handle(app(NotificationProviderClient::class));
+        (new ProcessNotificationJob($notification->id))->handle(app(NotificationProviderClient::class), app(Metrics::class));
 
         $this->assertDatabaseHas('notifications', [
             'id' => $notification->id,
@@ -64,7 +65,7 @@ class ProcessNotificationJobTest extends TestCase
             'status' => Notification::STATUS_CANCELLED,
         ]);
 
-        (new ProcessNotificationJob($notification->id))->handle(app(NotificationProviderClient::class));
+        (new ProcessNotificationJob($notification->id))->handle(app(NotificationProviderClient::class), app(Metrics::class));
 
         $this->assertDatabaseHas('notifications', [
             'id' => $notification->id,
@@ -74,7 +75,7 @@ class ProcessNotificationJobTest extends TestCase
 
     public function test_job_is_safe_when_notification_does_not_exist(): void
     {
-        (new ProcessNotificationJob('00000000-0000-0000-0000-000000000000'))->handle(app(NotificationProviderClient::class));
+        (new ProcessNotificationJob('00000000-0000-0000-0000-000000000000'))->handle(app(NotificationProviderClient::class), app(Metrics::class));
 
         $this->assertTrue(true);
     }
@@ -95,7 +96,7 @@ class ProcessNotificationJobTest extends TestCase
             'status' => Notification::STATUS_QUEUED,
         ]);
 
-        (new ProcessNotificationJob($notification->id))->handle(app(NotificationProviderClient::class));
+        (new ProcessNotificationJob($notification->id))->handle(app(NotificationProviderClient::class), app(Metrics::class));
 
         $this->assertDatabaseHas('notifications', [
             'id' => $notification->id,
@@ -122,7 +123,7 @@ class ProcessNotificationJobTest extends TestCase
         $this->expectException(TransientProviderException::class);
 
         try {
-            (new ProcessNotificationJob($notification->id))->handle(app(NotificationProviderClient::class));
+            (new ProcessNotificationJob($notification->id))->handle(app(NotificationProviderClient::class), app(Metrics::class));
         } finally {
             $this->assertDatabaseHas('notifications', [
                 'id' => $notification->id,
@@ -166,7 +167,7 @@ class ProcessNotificationJobTest extends TestCase
         $job = Mockery::mock(ProcessNotificationJob::class, [$notification->id])->makePartial();
         $job->shouldReceive('release')->once()->with(1);
 
-        $job->handle(app(NotificationProviderClient::class));
+        $job->handle(app(NotificationProviderClient::class), app(Metrics::class));
 
         Http::assertNothingSent();
 
