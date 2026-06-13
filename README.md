@@ -316,6 +316,17 @@ Run all tests:
 php artisan test
 ```
 
+Run optional high-throughput load tests (uses fake provider + Redis queue, no webhook.site calls):
+
+```bash
+RUN_LOAD_TESTS=true php artisan test --filter=HighThroughputLoadTest
+```
+
+Notes:
+- These tests are disabled by default to keep CI and local feedback fast.
+- They validate 5 scenarios: `1000` batch burst acceptance, `1000` synthetic processing throughput, rapid-fire single request bursts, repeated sequential batch bursts, and high-volume idempotency replay behavior.
+- Thresholds are intentionally conservative to reduce machine-specific flakiness.
+
 Current baseline:
 - full suite passing
 - includes API behavior, validation, idempotency, scheduling, template rendering, queue dispatch, and job state transition coverage
