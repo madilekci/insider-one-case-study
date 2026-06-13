@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Redis;
 use Tests\TestCase;
@@ -33,6 +34,9 @@ class RedisQueueIntegrationTest extends TestCase
         } catch (\Throwable $e) {
             $this->markTestSkipped('Redis is not reachable for integration tests: '.$e->getMessage());
         }
+
+        // Clear rate limiter and metrics state between test runs to avoid cross-test interference
+        Cache::flush();
 
         Redis::del('queues:high', 'queues:normal', 'queues:low');
     }
