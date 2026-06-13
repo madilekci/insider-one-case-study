@@ -4,153 +4,116 @@ Case study implementation for Insider One.
 
 ## What Is Built
 
-- Notification Management API (single + batch create, status lookup, list/filter, cancel)
-- Async queue processing with priority queues (`high`, `normal`, `low`)
-- Idempotency support (single header and batch item key)
-- Scheduled notifications with delayed dispatch and `pending` status
-- Template system with variable substitution before enqueueing
-- Docker runtime: one-command startup with API + worker + Redis
-- Channel rate limiting (100 notifications/second/channel with delayed re-queue)
-- Provider integration via webhook.site with retry and error classification
-- Observability: `/metrics` endpoint + structured logs with correlation IDs
+- **Notification Management API** (single + batch create, status lookup, list/filter, cancel)
+- **Async queue processing** with priority queues (high, normal, low)
+- **Idempotency support** (single header and batch item key)
+- **Scheduled notifications** with delayed dispatch and pending status
+- **Template system** with variable substitution before enqueueing
+- **Redis-backed queue worker pipeline**
+- **Channel rate limiting** (100 notifications/second/channel with delayed re-queue)
+- **Provider integration** via webhook.site with retry and error classification
+- **Observability**: metrics endpoint + structured logs with correlation IDs
+- **Bonus local Dev Dashboard**: live metrics, health, logs, demo traffic, and in-browser test runner
 
-## Architecture Decisions
+## Architecture Snapshot
 
-**SQLite over Postgres/MySQL** — sufficient for a case study; no infra to provision, migrations work identically.
+- **API**: Laravel 13
+- **Database**: SQLite
+- **Queue backend**: Redis
+- **Worker**: Laravel queue worker consuming high,normal,low
 
-**Separate Redis queues per priority** — Laravel worker drains `high` before `normal` before `low` because of queue order in `queue:work redis --queue=high,normal,low`. Simpler and more predictable than a single queue with a priority column.
+## Quick Start (Recommended: Docker)
 
-**Error classification (transient vs permanent)** — 5xx/429/connection errors are retried (TransientProviderException); 4xx client errors are not (PermanentProviderException). This avoids burning retries on bad input.
+This is the clean, linear setup flow.
 
-**Retry policy: 4 attempts with backoff [5s, 30s, 120s]** — covers momentary outages without indefinite retries.
+### 1. Prerequisites
 
-**Rate limiting via RateLimiter + job release** — jobs exceeding 100/sec/channel are re-queued with a 1-second delay instead of dropped. Enforced in the worker, not the API, to avoid blocking HTTP request handling.
-
-**Scheduled notifications via delayed jobs** — future `scheduled_at` requests are stored as `pending` and dispatched with a queue delay so worker capacity is not wasted polling.
-
-**Template rendering in the API layer** — a small config-backed template registry keeps the feature simple while still demonstrating variable substitution and channel-aware validation.
-
-**Counter-based metrics in Cache** — lightweight, no Prometheus dependency needed for MVP. Redis-backed cache so counters survive restarts.
-
-**Correlation ID as middleware** — every request gets an `X-Correlation-ID` (generated if missing). It propagates to the response header and is included in all structured log entries for end-to-end traceability.
-
-## Architecture (Current)
-
-- API: Laravel 13
-- Database: SQLite
-- Queue backend: Redis
-- Worker: Laravel queue worker consuming `high,normal,low`
-
-## How to run with Docker
-
-Prerequisites:
 - Docker Engine
-- Docker Compose plugin (`docker compose`)
+- Docker Compose plugin (docker compose)
 
-Start everything:
-
-```bash
-docker compose up --build
-```
-
-What starts:
-- `app` on `http://localhost:8000`
-- `worker` for async processing
-- `redis` as queue backend
-
-Health check:
+### 2. Create environment file
 
 ```bash
-curl -i http://localhost:8000/health
+cp .env.example .env
 ```
 
-Metrics snapshot:
+### 3. Configure provider once (before startup)
 
-```bash
-curl -sS http://localhost:8000/metrics
-```
+1) Open https://webhook.site and copy your generated unique URL.
 
-Stop:
-
-```bash
-docker compose down
-```
-
-## Set Up The Provider (webhook.site)
-
-1. Open https://webhook.site and copy your generated unique URL.
-2. Configure webhook.site response so API gets task-compliant payload:
-
-- Open your webhook page and go to Edit / Customize Response.
-- Set status code to `202`.
-- Set header `Content-Type: application/json`.
-- Set response body to:
+2) In webhook.site, configure a stable JSON response:
+- Status code: 202
+- Header: Content-Type: application/json
+- Body:
 
 ```json
 {
-	"messageId": "provider-demo-id",
-	"status": "accepted",
-	"timestamp": "2026-06-13T06:30:00Z"
+  "messageId": "provider-demo-id",
+  "status": "accepted",
+  "timestamp": "2026-06-13T06:30:00Z"
 }
 ```
 
-Without this, webhook.site may return HTML and the worker will treat it as transient failure and retry.
+3) Update these keys in .env:
 
-Custom actions and dynamic responses are possible with webhook.site's Rules feature, but the static response above is sufficient for testing the integration.
-
-3. Put your URL in `.env`:
-
-```bash
+```dotenv
 NOTIFICATION_PROVIDER_WEBHOOK_URL=https://webhook.site/<your-uuid>
 NOTIFICATION_PROVIDER_TIMEOUT_SECONDS=10
 NOTIFICATION_RATE_LIMIT_PER_SECOND=100
 NOTIFICATION_RATE_LIMIT_RELEASE_SECONDS=1
 ```
 
-4. If you run with Docker, restart so containers receive updated env values:
+Why this order matters: docker-compose reads variables from .env at startup, so you do not need a stop/start cycle just to apply provider configuration.
+
+### 4. Start the stack
 
 ```bash
-docker compose down
 docker compose up --build
 ```
 
-5. Send a test notification:
+What starts:
+- app on http://localhost:8000
+- worker for async processing
+- redis as queue backend
+
+### 5. Verify system health
+
+```bash
+curl -i http://localhost:8000/health
+curl -sS http://localhost:8000/metrics | jq .
+```
+
+### 6. Send a first notification
 
 ```bash
 curl -X POST http://localhost:8000/api/notifications \
-	-H "Content-Type: application/json" \
-	-d '{
-		"channel":"sms",
-		"recipient":"+905551234567",
-		"content":"Provider integration test",
-		"priority":"high"
-	}'
+  -H "Content-Type: application/json" \
+  -d '{
+    "channel":"sms",
+    "recipient":"+905551234567",
+    "content":"Provider integration test",
+    "priority":"high"
+  }'
 ```
 
-6. Verify in webhook.site UI:
-- You should see a POST request with payload fields: `to`, `channel`, `content`
-- If worker is running, notification status should move to `sent`
+In webhook.site you should see a POST payload with to, channel, and content. If the worker is healthy, status should move to sent.
 
-7. Check the saved delivery result from API:
+### 7. Stop
 
 ```bash
-curl http://localhost:8000/api/notifications/<notification-id>
+docker compose down
 ```
-
-Look for:
-- `status: sent`
-- `provider_response.messageId`
-- `provider_response.timestamp`
 
 ## Local Run (Without Docker)
 
-Prerequisites:
+### Prerequisites
+
 - PHP 8.3+
 - Composer
 - SQLite
-- Redis (for real queue processing)
+- Redis
 
-Setup:
+### Setup
 
 ```bash
 cp .env.example .env
@@ -158,11 +121,13 @@ php artisan key:generate
 php artisan migrate
 ```
 
-Provider setup
+Update provider configuration in .env:
 
-```bash
-# set this to your webhook.site URL
+```dotenv
 NOTIFICATION_PROVIDER_WEBHOOK_URL=https://webhook.site/<your-uuid>
+NOTIFICATION_PROVIDER_TIMEOUT_SECONDS=10
+NOTIFICATION_RATE_LIMIT_PER_SECOND=100
+NOTIFICATION_RATE_LIMIT_RELEASE_SECONDS=1
 ```
 
 Run API:
@@ -177,30 +142,38 @@ Run worker:
 php artisan queue:work redis --queue=high,normal,low
 ```
 
-## Channel Rate Limiting
+## Bonus: Local Dev Dashboard
 
-- Limit is enforced per `channel` (sms/email/push)
-- Default is `100` messages per second per channel
-- When limit is exceeded, job is re-queued with a short delay (`1` second by default)
+The project includes a local-only developer dashboard for live operational visibility during demos and debugging.
 
-Configuration:
+Access:
 
-```bash
-NOTIFICATION_RATE_LIMIT_PER_SECOND=100
-NOTIFICATION_RATE_LIMIT_RELEASE_SECONDS=1
+```text
+http://localhost:8000/dashboard
 ```
+
+Dashboard capabilities:
+- **Metrics cards** (created, sent, failed, retries, rate-limited, success/failure rates, average provider latency)
+- **Queue depth** (high, normal, low)
+- **Health checks** (Redis, DB, worker heartbeat, provider webhook config)
+- **Live event stream** with filters (correlation_id, notification_id, event, level)
+- **Latest notifications table** with status and channel filters
+- **Background test runner** with live output polling
+- **Demo traffic generator** (15-120 seconds)
+- **Demo data cleanup** (demo notifications, event log, operational counters)
+
+**Note**: dashboard routes are local-only and return 403 outside local environment.
 
 ## Observability
 
 ### Metrics
 
-`/metrics` returns a JSON snapshot with:
-
-- Notification counters: `created_total`, `sent_total`, `failed_total`, `retry_total`, `rate_limited_total`
-- Rates: `success_rate`, `failure_rate` (0.0–1.0, null if no processed notifications yet)
-- Per-channel counters: `created_by_channel`, `rate_limited_by_channel`
-- Provider counters: `request_total`, `transient_failure_total`, `permanent_failure_total`, `avg_latency_ms`
-- Queue depth gauges: `high`, `normal`, `low`
+GET /metrics returns:
+- Notification counters: created_total, sent_total, failed_total, retry_total, rate_limited_total, cancelled_total
+- Rates: success_rate, failure_rate
+- Per-channel counters: created_by_channel, rate_limited_by_channel
+- Provider counters: request_total, transient_failure_total, permanent_failure_total, avg_latency_ms
+- Queue depth gauges: high, normal, low
 
 ```bash
 curl -sS http://localhost:8000/metrics | jq .
@@ -208,15 +181,14 @@ curl -sS http://localhost:8000/metrics | jq .
 
 ### Correlation ID
 
-Every request includes an `X-Correlation-ID` response header. Pass your own or one is generated automatically:
+Every request includes X-Correlation-ID in the response.
+If not provided by client, it is generated automatically.
 
 ```bash
 curl -i -H "X-Correlation-ID: my-trace-123" http://localhost:8000/health
 ```
 
-All structured log entries for that request include `correlation_id` alongside `notification_id`, `batch_id`, `channel`, and `attempt`.
-
-Log event names: `notification.processing`, `notification.sent`, `notification.failed.transient`, `notification.failed.permanent`, `notification.failed.unexpected`, `notification.rate_limited`.
+Structured logs include correlation_id with notification_id, batch_id, channel, and attempt.
 
 ## Example API Requests
 
@@ -224,61 +196,61 @@ Create single notification:
 
 ```bash
 curl -X POST http://localhost:8000/api/notifications \
-	-H "Content-Type: application/json" \
-	-H "Idempotency-Key: single-001" \
-	-d '{
-		"channel":"sms",
-		"recipient":"+905551234567",
-		"content":"Flash sale starts now",
-		"priority":"high"
-	}'
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: single-001" \
+  -d '{
+    "channel":"sms",
+    "recipient":"+905551234567",
+    "content":"Flash sale starts now",
+    "priority":"high"
+  }'
 ```
 
 Create batch:
 
 ```bash
 curl -X POST http://localhost:8000/api/notifications \
-	-H "Content-Type: application/json" \
-	-d '{
-		"notifications": [
-			{"channel":"sms","recipient":"+905551234567","content":"A","priority":"high","idempotency_key":"batch-1"},
-			{"channel":"email","recipient":"user@example.com","content":"B","priority":"normal","idempotency_key":"batch-2"}
-		]
-	}'
+  -H "Content-Type: application/json" \
+  -d '{
+    "notifications": [
+      {"channel":"sms","recipient":"+905551234567","content":"A","priority":"high","idempotency_key":"batch-1"},
+      {"channel":"email","recipient":"user@example.com","content":"B","priority":"normal","idempotency_key":"batch-2"}
+    ]
+  }'
 ```
 
 Create scheduled notification:
 
 ```bash
 curl -X POST http://localhost:8000/api/notifications \
-	-H "Content-Type: application/json" \
-	-d '{
-		"channel":"email",
-		"recipient":"user@example.com",
-		"content":"Reminder for tomorrow",
-		"priority":"normal",
-		"scheduled_at":"2026-06-14T09:00:00Z"
-	}'
+  -H "Content-Type: application/json" \
+  -d '{
+    "channel":"email",
+    "recipient":"user@example.com",
+    "content":"Reminder for tomorrow",
+    "priority":"normal",
+    "scheduled_at":"2026-06-14T09:00:00Z"
+  }'
 ```
 
 Create from template:
 
 ```bash
 curl -X POST http://localhost:8000/api/notifications \
-	-H "Content-Type: application/json" \
-	-d '{
-		"channel":"sms",
-		"recipient":"+905551234567",
-		"template_key":"welcome_sms",
-		"template_variables":{
-			"name":"Ada",
-			"code":"123456"
-		},
-		"priority":"high"
-	}'
+  -H "Content-Type: application/json" \
+  -d '{
+    "channel":"sms",
+    "recipient":"+905551234567",
+    "template_key":"welcome_sms",
+    "template_variables":{
+      "name":"Ada",
+      "code":"123456"
+    },
+    "priority":"high"
+  }'
 ```
 
-List available templates:
+List templates:
 
 ```bash
 curl http://localhost:8000/api/templates
@@ -308,7 +280,7 @@ Cancel pending/queued notification:
 curl -X POST http://localhost:8000/api/notifications/{id}/cancel
 ```
 
-## Test Suite
+## Testing
 
 Run all tests:
 
@@ -323,20 +295,44 @@ RUN_LOAD_TESTS=true php artisan test --filter=HighThroughputLoadTest
 ```
 
 Notes:
-- These tests are disabled by default to keep CI and local feedback fast.
-- They validate 5 scenarios: `1000` batch burst acceptance, `1000` synthetic processing throughput, rapid-fire single request bursts, repeated sequential batch bursts, and high-volume idempotency replay behavior.
-- Thresholds are intentionally conservative to reduce machine-specific flakiness.
-
-Current baseline:
-- full suite passing
-- includes API behavior, validation, idempotency, scheduling, template rendering, queue dispatch, and job state transition coverage
+- **Load tests are disabled by default** to keep feedback fast.
+- Coverage includes API behavior, validation, idempotency, scheduling, template rendering, queue dispatch, and job state transitions.
 
 ## API Documentation
 
-The OpenAPI specification is available at [docs/openapi.yaml](docs/openapi.yaml).
+OpenAPI specification:
+- docs/openapi.yaml
 
-It covers:
+Covers:
 - notification create/list/show/cancel endpoints
 - batch lookup
 - health and metrics endpoints
 - request and response schemas used by the assessment
+
+## Architecture Decisions
+
+SQLite over Postgres/MySQL:
+- Fits case-study scope with minimal infrastructure overhead.
+
+Separate Redis queues per priority:
+- Worker order high,normal,low gives deterministic prioritization.
+
+Error classification:
+- Transient failures (5xx, 429, connection) are retried.
+- Permanent failures (4xx validation/client errors) are not retried.
+
+Retry policy:
+- Up to 4 attempts with backoff 5s, 30s, 120s.
+
+Rate limiting:
+- Enforced in worker layer, not API layer, to avoid blocking request handling.
+
+Scheduled notifications:
+- Stored as pending and released as delayed jobs.
+
+Template rendering:
+- Applied before enqueueing with channel-aware validation.
+
+Metrics model:
+- Lightweight counters and gauges suitable for local/demo observability.
+
