@@ -8,6 +8,7 @@ use App\Services\Exceptions\TransientProviderException;
 use App\Services\NotificationProviderClient;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
 class ProcessNotificationJob implements ShouldQueue
@@ -44,6 +45,17 @@ class ProcessNotificationJob implements ShouldQueue
             return;
         }
 
+        if (! $this->acquireChannelRateLimit($notification)) {
+            $notification->attempt_count = $this->attempts();
+            $notification->status = Notification::STATUS_QUEUED;
+            $notification->last_error = sprintf('Rate limit exceeded for channel: %s', $notification->channel);
+            $notification->save();
+
+            $this->release((int) config('notifications.rate_limit.release_seconds', 1));
+
+            return;
+        }
+
         $notification->status = Notification::STATUS_PROCESSING;
         $notification->attempt_count = $this->attempts();
         $notification->save();
@@ -74,6 +86,29 @@ class ProcessNotificationJob implements ShouldQueue
 
             throw $e;
         }
+    }
+
+    private function acquireChannelRateLimit(Notification $notification): bool
+    {
+        $limitPerSecond = (int) config('notifications.rate_limit.per_second', 100);
+
+        if ($limitPerSecond < 1) {
+            return false;
+        }
+
+        $bucketKey = sprintf(
+            'notifications:channel:%s:%s',
+            $notification->channel,
+            now()->format('YmdHis')
+        );
+
+        if (RateLimiter::tooManyAttempts($bucketKey, $limitPerSecond)) {
+            return false;
+        }
+
+        RateLimiter::hit($bucketKey, 1);
+
+        return true;
     }
 
     public function failed(Throwable $exception): void

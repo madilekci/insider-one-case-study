@@ -7,6 +7,7 @@ Core scope completed so far:
 - Async queue processing with priority queues (`high`, `normal`, `low`)
 - Idempotency support (single header and batch item key)
 - Docker runtime with API + worker + Redis
+- Channel rate limiting (100 notifications/second/channel with delayed re-queue)
 
 ## Architecture (Current)
 
@@ -68,6 +69,8 @@ Without this, webhook.site may return HTML and the worker will treat it as trans
 ```bash
 NOTIFICATION_PROVIDER_WEBHOOK_URL=https://webhook.site/<your-uuid>
 NOTIFICATION_PROVIDER_TIMEOUT_SECONDS=10
+NOTIFICATION_RATE_LIMIT_PER_SECOND=100
+NOTIFICATION_RATE_LIMIT_RELEASE_SECONDS=1
 ```
 
 4. If you run with Docker, restart so containers receive updated env values:
@@ -138,6 +141,19 @@ Run worker:
 
 ```bash
 php artisan queue:work redis --queue=high,normal,low
+```
+
+## Channel Rate Limiting (Step 5)
+
+- Limit is enforced per `channel` (sms/email/push)
+- Default is `100` messages per second per channel
+- When limit is exceeded, job is re-queued with a short delay (`1` second by default)
+
+Configuration:
+
+```bash
+NOTIFICATION_RATE_LIMIT_PER_SECOND=100
+NOTIFICATION_RATE_LIMIT_RELEASE_SECONDS=1
 ```
 
 ## Example API Requests

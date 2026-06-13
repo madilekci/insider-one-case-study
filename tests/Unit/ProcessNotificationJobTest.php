@@ -8,6 +8,8 @@ use App\Services\NotificationProviderClient;
 use App\Services\Exceptions\TransientProviderException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
+use Mockery;
 use Tests\TestCase;
 
 class ProcessNotificationJobTest extends TestCase
@@ -135,5 +137,42 @@ class ProcessNotificationJobTest extends TestCase
 
         $this->assertSame([5, 30, 120], $job->backoff());
         $this->assertSame(4, $job->tries);
+    }
+
+    public function test_job_releases_when_channel_rate_limit_is_exceeded(): void
+    {
+        config()->set('notifications.rate_limit.per_second', 1);
+        config()->set('notifications.rate_limit.release_seconds', 1);
+
+        $notification = Notification::create([
+            'channel' => 'sms',
+            'recipient' => '+905551234567',
+            'content' => 'rate-limited-item',
+            'priority' => 'normal',
+            'status' => Notification::STATUS_QUEUED,
+        ]);
+
+        $bucketKey = sprintf('notifications:channel:%s:%s', $notification->channel, now()->format('YmdHis'));
+        RateLimiter::hit($bucketKey, 1);
+
+        Http::fake([
+            'https://example.test/provider' => Http::response([
+                'messageId' => 'provider-msg-1',
+                'status' => 'accepted',
+                'timestamp' => now()->toISOString(),
+            ], 202),
+        ]);
+
+        $job = Mockery::mock(ProcessNotificationJob::class, [$notification->id])->makePartial();
+        $job->shouldReceive('release')->once()->with(1);
+
+        $job->handle(app(NotificationProviderClient::class));
+
+        Http::assertNothingSent();
+
+        $notification->refresh();
+
+        $this->assertSame(Notification::STATUS_QUEUED, $notification->status);
+        $this->assertSame('Rate limit exceeded for channel: sms', $notification->last_error);
     }
 }
