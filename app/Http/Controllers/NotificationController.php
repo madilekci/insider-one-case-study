@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ListNotificationsRequest;
 use App\Http\Requests\StoreNotificationRequest;
 use App\Http\Resources\NotificationResource;
+use App\Jobs\ProcessNotificationJob;
 use App\Models\Notification;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -21,31 +22,42 @@ class NotificationController extends Controller
             $batchId = (string) Str::uuid();
             $notifications = collect($data['notifications'])
                 ->map(function (array $item) use ($batchId): Notification {
-                    return Notification::create([
-                        'batch_id' => $batchId,
-                        'idempotency_key' => $item['idempotency_key'] ?? null,
-                        'channel' => $item['channel'],
-                        'recipient' => $item['recipient'],
-                        'content' => $item['content'],
-                        'priority' => $item['priority'] ?? Notification::PRIORITY_NORMAL,
-                        'status' => Notification::STATUS_QUEUED,
-                    ]);
+                    return $this->createOrReuseBatchNotification($item, $batchId);
                 });
+
+            $statusCode = $notifications->contains(fn (Notification $notification): bool => $notification->wasRecentlyCreated)
+                ? 201
+                : 200;
 
             return response()->json([
                 'batch_id' => $batchId,
                 'count' => $notifications->count(),
                 'notifications' => NotificationResource::collection($notifications),
-            ], 201);
+            ], $statusCode);
+        }
+
+        $idempotencyKey = $request->header('Idempotency-Key');
+
+        if ($idempotencyKey) {
+            $existing = Notification::query()->where('idempotency_key', $idempotencyKey)->first();
+
+            if ($existing) {
+                return response()->json([
+                    'notification' => new NotificationResource($existing),
+                ]);
+            }
         }
 
         $notification = Notification::create([
+            'idempotency_key' => $idempotencyKey,
             'channel' => $data['channel'],
             'recipient' => $data['recipient'],
             'content' => $data['content'],
             'priority' => $data['priority'] ?? Notification::PRIORITY_NORMAL,
             'status' => Notification::STATUS_QUEUED,
         ]);
+
+        $this->dispatchForProcessing($notification);
 
         return response()->json([
             'notification' => new NotificationResource($notification),
@@ -120,5 +132,37 @@ class NotificationController extends Controller
         return response()->json([
             'notification' => new NotificationResource($notification),
         ]);
+    }
+
+    private function createOrReuseBatchNotification(array $item, string $batchId): Notification
+    {
+        $idempotencyKey = $item['idempotency_key'] ?? null;
+
+        if ($idempotencyKey) {
+            $existing = Notification::query()->where('idempotency_key', $idempotencyKey)->first();
+
+            if ($existing) {
+                return $existing;
+            }
+        }
+
+        $notification = Notification::create([
+            'batch_id' => $batchId,
+            'idempotency_key' => $idempotencyKey,
+            'channel' => $item['channel'],
+            'recipient' => $item['recipient'],
+            'content' => $item['content'],
+            'priority' => $item['priority'] ?? Notification::PRIORITY_NORMAL,
+            'status' => Notification::STATUS_QUEUED,
+        ]);
+
+        $this->dispatchForProcessing($notification);
+
+        return $notification;
+    }
+
+    private function dispatchForProcessing(Notification $notification): void
+    {
+        ProcessNotificationJob::dispatch($notification->id)->onQueue($notification->priority);
     }
 }
