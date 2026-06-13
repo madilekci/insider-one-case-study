@@ -1,0 +1,124 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Requests\ListNotificationsRequest;
+use App\Http\Requests\StoreNotificationRequest;
+use App\Http\Resources\NotificationResource;
+use App\Models\Notification;
+use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Str;
+
+class NotificationController extends Controller
+{
+    public function store(StoreNotificationRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        if (isset($data['notifications'])) {
+            $batchId = (string) Str::uuid();
+            $notifications = collect($data['notifications'])
+                ->map(function (array $item) use ($batchId): Notification {
+                    return Notification::create([
+                        'batch_id' => $batchId,
+                        'idempotency_key' => $item['idempotency_key'] ?? null,
+                        'channel' => $item['channel'],
+                        'recipient' => $item['recipient'],
+                        'content' => $item['content'],
+                        'priority' => $item['priority'] ?? Notification::PRIORITY_NORMAL,
+                        'status' => Notification::STATUS_QUEUED,
+                    ]);
+                });
+
+            return response()->json([
+                'batch_id' => $batchId,
+                'count' => $notifications->count(),
+                'notifications' => NotificationResource::collection($notifications),
+            ], 201);
+        }
+
+        $notification = Notification::create([
+            'channel' => $data['channel'],
+            'recipient' => $data['recipient'],
+            'content' => $data['content'],
+            'priority' => $data['priority'] ?? Notification::PRIORITY_NORMAL,
+            'status' => Notification::STATUS_QUEUED,
+        ]);
+
+        return response()->json([
+            'notification' => new NotificationResource($notification),
+        ], 201);
+    }
+
+    public function show(string $id): NotificationResource
+    {
+        $notification = Notification::query()->findOrFail($id);
+
+        return new NotificationResource($notification);
+    }
+
+    public function index(ListNotificationsRequest $request): AnonymousResourceCollection
+    {
+        $query = Notification::query()->orderByDesc('created_at');
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->string('status')->toString());
+        }
+
+        if ($request->filled('channel')) {
+            $query->where('channel', $request->string('channel')->toString());
+        }
+
+        if ($request->filled('from')) {
+            $query->where('created_at', '>=', Carbon::parse($request->string('from')->toString())->startOfDay());
+        }
+
+        if ($request->filled('to')) {
+            $query->where('created_at', '<=', Carbon::parse($request->string('to')->toString())->endOfDay());
+        }
+
+        $notifications = $query->paginate($request->integer('per_page', 20))->appends($request->query());
+
+        return NotificationResource::collection($notifications);
+    }
+
+    public function batch(string $batchId): JsonResponse
+    {
+        $notifications = Notification::query()
+            ->where('batch_id', $batchId)
+            ->orderBy('created_at')
+            ->get();
+
+        if ($notifications->isEmpty()) {
+            return response()->json([
+                'message' => 'Batch not found.',
+            ], 404);
+        }
+
+        return response()->json([
+            'batch_id' => $batchId,
+            'count' => $notifications->count(),
+            'notifications' => NotificationResource::collection($notifications),
+        ]);
+    }
+
+    public function cancel(string $id): JsonResponse
+    {
+        $notification = Notification::query()->findOrFail($id);
+
+        if (! in_array($notification->status, [Notification::STATUS_PENDING, Notification::STATUS_QUEUED], true)) {
+            return response()->json([
+                'message' => 'Only pending or queued notifications can be cancelled.',
+            ], 422);
+        }
+
+        $notification->status = Notification::STATUS_CANCELLED;
+        $notification->save();
+
+        return response()->json([
+            'notification' => new NotificationResource($notification),
+        ]);
+    }
+}
