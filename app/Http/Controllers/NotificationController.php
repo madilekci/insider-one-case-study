@@ -7,15 +7,26 @@ use App\Http\Requests\StoreNotificationRequest;
 use App\Http\Resources\NotificationResource;
 use App\Jobs\ProcessNotificationJob;
 use App\Models\Notification;
+use App\Services\NotificationTemplateService;
 use App\Services\Observability\Metrics;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class NotificationController extends Controller
 {
-    public function __construct(private Metrics $metrics)
+    private const CONTENT_LIMITS = [
+        Notification::CHANNEL_SMS => 160,
+        Notification::CHANNEL_PUSH => 240,
+        Notification::CHANNEL_EMAIL => 5000,
+    ];
+
+    public function __construct(
+        private Metrics $metrics,
+        private NotificationTemplateService $templates,
+    )
     {
     }
 
@@ -57,9 +68,12 @@ class NotificationController extends Controller
             'idempotency_key' => $idempotencyKey,
             'channel' => $data['channel'],
             'recipient' => $data['recipient'],
-            'content' => $data['content'],
+            'content' => $this->resolveContent($data),
+            'template_key' => $data['template_key'] ?? null,
+            'template_variables' => $data['template_variables'] ?? null,
             'priority' => $data['priority'] ?? Notification::PRIORITY_NORMAL,
-            'status' => Notification::STATUS_QUEUED,
+            'status' => $this->resolveInitialStatus($data),
+            'scheduled_at' => isset($data['scheduled_at']) ? Carbon::parse($data['scheduled_at']) : null,
         ]);
 
         $this->metrics->incrementCreated($notification->channel);
@@ -159,9 +173,12 @@ class NotificationController extends Controller
             'idempotency_key' => $idempotencyKey,
             'channel' => $item['channel'],
             'recipient' => $item['recipient'],
-            'content' => $item['content'],
+            'content' => $this->resolveContent($item),
+            'template_key' => $item['template_key'] ?? null,
+            'template_variables' => $item['template_variables'] ?? null,
             'priority' => $item['priority'] ?? Notification::PRIORITY_NORMAL,
-            'status' => Notification::STATUS_QUEUED,
+            'status' => $this->resolveInitialStatus($item),
+            'scheduled_at' => isset($item['scheduled_at']) ? Carbon::parse($item['scheduled_at']) : null,
         ]);
 
         $this->metrics->incrementCreated($notification->channel);
@@ -173,6 +190,53 @@ class NotificationController extends Controller
 
     private function dispatchForProcessing(Notification $notification): void
     {
-        ProcessNotificationJob::dispatch($notification->id)->onQueue($notification->priority);
+        $dispatch = ProcessNotificationJob::dispatch($notification->id)->onQueue($notification->priority);
+
+        if ($notification->scheduled_at?->isFuture()) {
+            $dispatch->delay($notification->scheduled_at);
+        }
+    }
+
+    private function resolveContent(array $payload): string
+    {
+        if (! empty($payload['template_key'])) {
+            $content = $this->templates->render(
+                (string) $payload['template_key'],
+                (string) $payload['channel'],
+                (array) ($payload['template_variables'] ?? []),
+            );
+
+            $this->ensureContentLengthAllowed((string) $payload['channel'], $content);
+
+            return $content;
+        }
+
+        $content = (string) ($payload['content'] ?? '');
+
+        $this->ensureContentLengthAllowed((string) $payload['channel'], $content);
+
+        return $content;
+    }
+
+    private function resolveInitialStatus(array $payload): string
+    {
+        if (! isset($payload['scheduled_at'])) {
+            return Notification::STATUS_QUEUED;
+        }
+
+        return Carbon::parse($payload['scheduled_at'])->isFuture()
+            ? Notification::STATUS_PENDING
+            : Notification::STATUS_QUEUED;
+    }
+
+    private function ensureContentLengthAllowed(string $channel, string $content): void
+    {
+        $limit = self::CONTENT_LIMITS[$channel] ?? null;
+
+        if ($limit !== null && mb_strlen($content) > $limit) {
+            throw ValidationException::withMessages([
+                'content' => ["Content exceeds maximum length of {$limit} for {$channel} channel."],
+            ]);
+        }
     }
 }

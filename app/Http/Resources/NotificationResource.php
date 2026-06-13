@@ -19,6 +19,8 @@ class NotificationResource extends JsonResource
             'channel' => $this->channel,
             'recipient' => $this->recipient,
             'content' => $this->content,
+            'template_key' => $this->template_key,
+            'template_variables' => $this->template_variables,
             'priority' => $this->priority,
             'status' => $this->status,
             'attempt_count' => $this->attempt_count,

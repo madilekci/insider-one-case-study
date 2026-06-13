@@ -47,6 +47,15 @@ class ProcessNotificationJob implements ShouldQueue
             return;
         }
 
+        if ($notification->scheduled_at?->isFuture()) {
+            $notification->status = Notification::STATUS_PENDING;
+            $notification->save();
+
+            $this->release(max(1, now()->diffInSeconds($notification->scheduled_at)));
+
+            return;
+        }
+
         if (! $this->acquireChannelRateLimit($notification)) {
             $notification->attempt_count = $this->attempts();
             $notification->status = Notification::STATUS_QUEUED;

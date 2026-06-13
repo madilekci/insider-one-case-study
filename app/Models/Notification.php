@@ -35,6 +35,8 @@ class Notification extends Model
         'channel',
         'recipient',
         'content',
+        'template_key',
+        'template_variables',
         'priority',
         'status',
         'scheduled_at',
@@ -47,6 +49,7 @@ class Notification extends Model
     {
         return [
             'provider_response' => 'array',
+            'template_variables' => 'array',
             'scheduled_at' => 'datetime',
         ];
     }

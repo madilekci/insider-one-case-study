@@ -7,6 +7,8 @@ Case study implementation for Insider One.
 - Notification Management API (single + batch create, status lookup, list/filter, cancel)
 - Async queue processing with priority queues (`high`, `normal`, `low`)
 - Idempotency support (single header and batch item key)
+- Scheduled notifications with delayed dispatch and `pending` status
+- Template system with variable substitution before enqueueing
 - Docker runtime: one-command startup with API + worker + Redis
 - Channel rate limiting (100 notifications/second/channel with delayed re-queue)
 - Provider integration via webhook.site with retry and error classification
@@ -24,6 +26,10 @@ Case study implementation for Insider One.
 
 **Rate limiting via RateLimiter + job release** — jobs exceeding 100/sec/channel are re-queued with a 1-second delay instead of dropped. Enforced in the worker, not the API, to avoid blocking HTTP request handling.
 
+**Scheduled notifications via delayed jobs** — future `scheduled_at` requests are stored as `pending` and dispatched with a queue delay so worker capacity is not wasted polling.
+
+**Template rendering in the API layer** — a small config-backed template registry keeps the feature simple while still demonstrating variable substitution and channel-aware validation.
+
 **Counter-based metrics in Cache** — lightweight, no Prometheus dependency needed for MVP. Redis-backed cache so counters survive restarts.
 
 **Correlation ID as middleware** — every request gets an `X-Correlation-ID` (generated if missing). It propagates to the response header and is included in all structured log entries for end-to-end traceability.
@@ -35,7 +41,7 @@ Case study implementation for Insider One.
 - Queue backend: Redis
 - Worker: Laravel queue worker consuming `high,normal,low`
 
-## Run With Docker (Recommended for Review)
+## How to run with Docker
 
 Prerequisites:
 - Docker Engine
@@ -70,7 +76,7 @@ Stop:
 docker compose down
 ```
 
-## Set Up The Actual Provider (webhook.site)
+## Set Up The Provider (webhook.site)
 
 1. Open https://webhook.site and copy your generated unique URL.
 2. Configure webhook.site response so API gets task-compliant payload:
@@ -84,11 +90,14 @@ docker compose down
 {
 	"messageId": "provider-demo-id",
 	"status": "accepted",
-	"timestamp": "{{timestamp}}"
+	"timestamp": "2026-06-13T06:30:00Z"
 }
 ```
 
 Without this, webhook.site may return HTML and the worker will treat it as transient failure and retry.
+
+Custom actions and dynamic responses are possible with webhook.site's Rules feature, but the static response above is sufficient for testing the integration.
+
 3. Put your URL in `.env`:
 
 ```bash
@@ -149,7 +158,7 @@ php artisan key:generate
 php artisan migrate
 ```
 
-Provider setup (Step 4):
+Provider setup
 
 ```bash
 # set this to your webhook.site URL
@@ -168,7 +177,7 @@ Run worker:
 php artisan queue:work redis --queue=high,normal,low
 ```
 
-## Channel Rate Limiting (Step 5)
+## Channel Rate Limiting
 
 - Limit is enforced per `channel` (sms/email/push)
 - Default is `100` messages per second per channel
@@ -181,7 +190,7 @@ NOTIFICATION_RATE_LIMIT_PER_SECOND=100
 NOTIFICATION_RATE_LIMIT_RELEASE_SECONDS=1
 ```
 
-## Observability (Step 6-7)
+## Observability
 
 ### Metrics
 
@@ -238,6 +247,43 @@ curl -X POST http://localhost:8000/api/notifications \
 	}'
 ```
 
+Create scheduled notification:
+
+```bash
+curl -X POST http://localhost:8000/api/notifications \
+	-H "Content-Type: application/json" \
+	-d '{
+		"channel":"email",
+		"recipient":"user@example.com",
+		"content":"Reminder for tomorrow",
+		"priority":"normal",
+		"scheduled_at":"2026-06-14T09:00:00Z"
+	}'
+```
+
+Create from template:
+
+```bash
+curl -X POST http://localhost:8000/api/notifications \
+	-H "Content-Type: application/json" \
+	-d '{
+		"channel":"sms",
+		"recipient":"+905551234567",
+		"template_key":"welcome_sms",
+		"template_variables":{
+			"name":"Ada",
+			"code":"123456"
+		},
+		"priority":"high"
+	}'
+```
+
+List available templates:
+
+```bash
+curl http://localhost:8000/api/templates
+```
+
 Fetch by ID:
 
 ```bash
@@ -272,4 +318,14 @@ php artisan test
 
 Current baseline:
 - full suite passing
-- includes API behavior, validation, idempotency, queue dispatch, and job state transition coverage
+- includes API behavior, validation, idempotency, scheduling, template rendering, queue dispatch, and job state transition coverage
+
+## API Documentation
+
+The OpenAPI specification is available at [docs/openapi.yaml](docs/openapi.yaml).
+
+It covers:
+- notification create/list/show/cancel endpoints
+- batch lookup
+- health and metrics endpoints
+- request and response schemas used by the assessment

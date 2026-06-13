@@ -1,0 +1,464 @@
+openapi: 3.0.3
+info:
+  title: Event-Driven Notification System API
+  version: 1.0.0
+  description: |
+    OpenAPI specification for the Insider One notification system assessment.
+    The API supports single and batch notification creation, status queries,
+    cancellation, metrics, and health checks.
+servers:
+  - url: http://localhost:8000
+tags:
+  - name: Notifications
+  - name: Batches
+  - name: Observability
+paths:
+  /health:
+    get:
+      tags: [Observability]
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+  /metrics:
+    get:
+      tags: [Observability]
+      summary: Snapshot of operational metrics
+      responses:
+        "200":
+          description: Metrics snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+  /api/notifications:
+    post:
+      tags: [Notifications]
+      summary: Create a single notification or a batch of notifications
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/SingleNotificationCreateRequest"
+                - $ref: "#/components/schemas/BatchNotificationCreateRequest"
+            examples:
+              single:
+                value:
+                  channel: sms
+                  recipient: "+905551234567"
+                  content: Flash sale starts now
+                  priority: high
+              batch:
+                value:
+                  notifications:
+                    - channel: sms
+                      recipient: "+905551234567"
+                      content: Flash sale starts now
+                      priority: high
+                      idempotency_key: batch-item-1
+                    - channel: email
+                      recipient: user@example.com
+                      content: Your weekly summary
+                      priority: normal
+                      idempotency_key: batch-item-2
+      responses:
+        "201":
+          description: Notification created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateNotificationResponse"
+        "200":
+          description: Existing notification returned for duplicate idempotency key or reused batch items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateNotificationResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+    get:
+      tags: [Notifications]
+      summary: List notifications with filtering and pagination
+      parameters:
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/NotificationStatus"
+        - in: query
+          name: channel
+          schema:
+            $ref: "#/components/schemas/NotificationChannel"
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: per_page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated notification list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedNotificationCollection"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationErrorResponse"
+  /api/notifications/{id}:
+    get:
+      tags: [Notifications]
+      summary: Get a notification by ID
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          description: Notification details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationEnvelope"
+        "404":
+          description: Notification not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/notifications/{id}/cancel:
+    post:
+      tags: [Notifications]
+      summary: Cancel a pending or queued notification
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          description: Notification cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationEnvelope"
+        "422":
+          description: Notification cannot be cancelled in current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Notification not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/batches/{batchId}:
+    get:
+      tags: [Batches]
+      summary: Get all notifications for a batch
+      parameters:
+        - $ref: "#/components/parameters/BatchId"
+      responses:
+        "200":
+          description: Batch details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchResponse"
+        "404":
+          description: Batch not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: false
+      schema:
+        type: string
+        maxLength: 255
+      description: Optional idempotency key for single notification requests.
+    NotificationId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BatchId:
+      in: path
+      name: batchId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    NotificationChannel:
+      type: string
+      enum: [sms, email, push]
+    NotificationPriority:
+      type: string
+      enum: [high, normal, low]
+    NotificationStatus:
+      type: string
+      enum: [pending, queued, processing, sent, failed, cancelled]
+    SingleNotificationCreateRequest:
+      type: object
+      required: [channel, recipient, content]
+      properties:
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        recipient:
+          type: string
+          maxLength: 255
+        content:
+          type: string
+        priority:
+          $ref: "#/components/schemas/NotificationPriority"
+      additionalProperties: false
+    BatchNotificationCreateRequest:
+      type: object
+      required: [notifications]
+      properties:
+        notifications:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/BatchNotificationItem"
+      additionalProperties: false
+    BatchNotificationItem:
+      type: object
+      required: [channel, recipient, content]
+      properties:
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        recipient:
+          type: string
+          maxLength: 255
+        content:
+          type: string
+        priority:
+          $ref: "#/components/schemas/NotificationPriority"
+        idempotency_key:
+          type: string
+          maxLength: 255
+      additionalProperties: false
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        batch_id:
+          type: string
+          format: uuid
+          nullable: true
+        idempotency_key:
+          type: string
+          nullable: true
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        recipient:
+          type: string
+        content:
+          type: string
+        priority:
+          $ref: "#/components/schemas/NotificationPriority"
+        status:
+          $ref: "#/components/schemas/NotificationStatus"
+        attempt_count:
+          type: integer
+        scheduled_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+        provider_response:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - channel
+        - recipient
+        - content
+        - priority
+        - status
+        - attempt_count
+    NotificationEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/Notification"
+    CreateNotificationResponse:
+      type: object
+      properties:
+        notification:
+          $ref: "#/components/schemas/Notification"
+        batch_id:
+          type: string
+          format: uuid
+        count:
+          type: integer
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+      additionalProperties: false
+    BatchResponse:
+      type: object
+      required: [batch_id, count, notifications]
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        count:
+          type: integer
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+    PaginatedNotificationCollection:
+      type: object
+      required: [data, links, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+        links:
+          type: object
+          additionalProperties: true
+        meta:
+          type: object
+          additionalProperties: true
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+    MetricsResponse:
+      type: object
+      required: [notifications, provider, queues]
+      properties:
+        notifications:
+          type: object
+          properties:
+            created_total:
+              type: integer
+            cancelled_total:
+              type: integer
+            sent_total:
+              type: integer
+            failed_total:
+              type: integer
+            retry_total:
+              type: integer
+            rate_limited_total:
+              type: integer
+            success_rate:
+              type: number
+              nullable: true
+            failure_rate:
+              type: number
+              nullable: true
+            created_by_channel:
+              type: object
+              additionalProperties: false
+              properties:
+                sms:
+                  type: integer
+                email:
+                  type: integer
+                push:
+                  type: integer
+            rate_limited_by_channel:
+              type: object
+              additionalProperties: false
+              properties:
+                sms:
+                  type: integer
+                email:
+                  type: integer
+                push:
+                  type: integer
+        provider:
+          type: object
+          properties:
+            request_total:
+              type: integer
+            transient_failure_total:
+              type: integer
+            permanent_failure_total:
+              type: integer
+            avg_latency_ms:
+              type: integer
+        queues:
+          type: object
+          properties:
+            high:
+              type: integer
+            normal:
+              type: integer
+            low:
+              type: integer
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+    ValidationErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: The given data was invalid.
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
