@@ -70,29 +70,58 @@ class Metrics
         $this->increment(self::KEY_PROVIDER_LATENCY_COUNT);
     }
 
+    public function resetOperationalCounters(): void
+    {
+        $keys = [
+            self::KEY_CREATED_TOTAL,
+            self::KEY_CANCELLED_TOTAL,
+            self::KEY_SENT_TOTAL,
+            self::KEY_FAILED_TOTAL,
+            self::KEY_RATE_LIMITED_TOTAL,
+            self::KEY_RETRY_TOTAL,
+            self::KEY_PROVIDER_TRANSIENT_FAILURE_TOTAL,
+            self::KEY_PROVIDER_PERMANENT_FAILURE_TOTAL,
+            self::KEY_PROVIDER_REQUEST_TOTAL,
+            self::KEY_PROVIDER_LATENCY_SUM_MS,
+            self::KEY_PROVIDER_LATENCY_COUNT,
+        ];
+
+        foreach (Notification::channels() as $channel) {
+            $keys[] = $this->channelCounterKey('created', $channel);
+            $keys[] = $this->channelCounterKey('rate_limited', $channel);
+        }
+
+        foreach ($keys as $key) {
+            Cache::forget($key);
+        }
+    }
+
     /**
      * @return array<string, mixed>
      */
     public function snapshot(): array
     {
+        $notificationTotals = $this->notificationTotals();
+        $overview = $this->overviewTotals();
         $latencyCount = $this->getInt(self::KEY_PROVIDER_LATENCY_COUNT);
         $latencySumMs = $this->getInt(self::KEY_PROVIDER_LATENCY_SUM_MS);
 
-        $sentTotal = $this->getInt(self::KEY_SENT_TOTAL);
-        $failedTotal = $this->getInt(self::KEY_FAILED_TOTAL);
+        $sentTotal = $notificationTotals['sent_total'];
+        $failedTotal = $notificationTotals['failed_total'];
         $processedTotal = $sentTotal + $failedTotal;
 
         return [
             'notifications' => [
-                'created_total' => $this->getInt(self::KEY_CREATED_TOTAL),
-                'cancelled_total' => $this->getInt(self::KEY_CANCELLED_TOTAL),
+                'created_total' => $notificationTotals['created_total'],
+                'cancelled_total' => $notificationTotals['cancelled_total'],
                 'sent_total' => $sentTotal,
                 'failed_total' => $failedTotal,
+                'overview' => $overview,
                 'retry_total' => $this->getInt(self::KEY_RETRY_TOTAL),
                 'rate_limited_total' => $this->getInt(self::KEY_RATE_LIMITED_TOTAL),
                 'success_rate' => $processedTotal > 0 ? round($sentTotal / $processedTotal, 4) : null,
                 'failure_rate' => $processedTotal > 0 ? round($failedTotal / $processedTotal, 4) : null,
-                'created_by_channel' => $this->channelMap('created'),
+                'created_by_channel' => $notificationTotals['created_by_channel'],
                 'rate_limited_by_channel' => $this->channelMap('rate_limited'),
             ],
             'provider' => [
@@ -118,6 +147,100 @@ class Metrics
     private function getInt(string $key): int
     {
         return (int) Cache::get($key, 0);
+    }
+
+    /**
+     * @return array{created_total: int, cancelled_total: int, sent_total: int, failed_total: int, created_by_channel: array<string, int>}
+     */
+    private function notificationTotals(): array
+    {
+        $channelTotals = array_fill_keys(Notification::channels(), 0);
+
+        try {
+            $createdByChannel = Notification::query()
+                ->selectRaw('channel, count(*) as total')
+                ->groupBy('channel')
+                ->pluck('total', 'channel')
+                ->map(fn (mixed $count): int => (int) $count)
+                ->all();
+
+            return [
+                'created_total' => (int) Notification::query()->count(),
+                'cancelled_total' => (int) Notification::query()->where('status', Notification::STATUS_CANCELLED)->count(),
+                'sent_total' => (int) Notification::query()->where('status', Notification::STATUS_SENT)->count(),
+                'failed_total' => (int) Notification::query()->where('status', Notification::STATUS_FAILED)->count(),
+                'created_by_channel' => array_replace($channelTotals, $createdByChannel),
+            ];
+        } catch (Throwable) {
+            return [
+                'created_total' => 0,
+                'cancelled_total' => 0,
+                'sent_total' => 0,
+                'failed_total' => 0,
+                'created_by_channel' => $channelTotals,
+            ];
+        }
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function overviewTotals(): array
+    {
+        try {
+            $statusCounts = Notification::query()
+                ->selectRaw('status, count(*) as total')
+                ->groupBy('status')
+                ->pluck('total', 'status')
+                ->map(fn (mixed $count): int => (int) $count)
+                ->all();
+
+            $queuedNew = (int) Notification::query()
+                ->where('status', Notification::STATUS_QUEUED)
+                ->where('attempt_count', 0)
+                ->count();
+
+            $queuedRetry = (int) Notification::query()
+                ->where('status', Notification::STATUS_QUEUED)
+                ->where('attempt_count', '>', 0)
+                ->count();
+
+            $sent = (int) ($statusCounts[Notification::STATUS_SENT] ?? 0);
+            $failed = (int) ($statusCounts[Notification::STATUS_FAILED] ?? 0);
+            $queued = (int) ($statusCounts[Notification::STATUS_QUEUED] ?? 0);
+            $pending = (int) ($statusCounts[Notification::STATUS_PENDING] ?? 0);
+            $processing = (int) ($statusCounts[Notification::STATUS_PROCESSING] ?? 0);
+
+            return [
+                'total' => (int) Notification::query()->count(),
+                'processed_total' => $sent + $failed,
+                'processed_sent' => $sent,
+                'processed_failed' => $failed,
+                'waiting_total' => $queued + $pending + $processing,
+                'waiting_retry' => $queuedRetry,
+                'waiting_new' => $queuedNew + $pending,
+                'in_queue_total' => $queued,
+                'in_queue_retry' => $queuedRetry,
+                'in_queue_new' => $queuedNew,
+                'scheduled_total' => $pending,
+                'processing_total' => $processing,
+            ];
+        } catch (Throwable) {
+            return [
+                'total' => 0,
+                'processed_total' => 0,
+                'processed_sent' => 0,
+                'processed_failed' => 0,
+                'waiting_total' => 0,
+                'waiting_retry' => 0,
+                'waiting_new' => 0,
+                'in_queue_total' => 0,
+                'in_queue_retry' => 0,
+                'in_queue_new' => 0,
+                'scheduled_total' => 0,
+                'processing_total' => 0,
+            ];
+        }
     }
 
     /**

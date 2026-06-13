@@ -6,6 +6,7 @@ use App\Models\Notification;
 use App\Services\Exceptions\PermanentProviderException;
 use App\Services\Exceptions\TransientProviderException;
 use App\Services\NotificationProviderClient;
+use App\Services\Observability\EventLog;
 use App\Services\Observability\Metrics;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -31,8 +32,14 @@ class ProcessNotificationJob implements ShouldQueue
         return [5, 30, 120];
     }
 
-    public function handle(NotificationProviderClient $providerClient, Metrics $metrics): void
+    public function handle(
+        NotificationProviderClient $providerClient,
+        Metrics $metrics,
+        ?EventLog $eventLog = null,
+    ): void
     {
+        $eventLog ??= app(EventLog::class);
+
         $notification = Notification::query()->find($this->notificationId);
 
         if (! $notification) {
@@ -63,12 +70,15 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->save();
             $metrics->incrementRateLimited($notification->channel);
 
-            Log::info('notification.rate_limited', [
+            $rateLimitCtx = [
                 'notification_id' => $notification->id,
-                'batch_id' => $notification->batch_id,
-                'channel' => $notification->channel,
-                'attempt' => $this->attempts(),
-            ]);
+                'batch_id'        => $notification->batch_id,
+                'channel'         => $notification->channel,
+                'attempt'         => $this->attempts(),
+                'message'         => 'Rate limit exceeded',
+            ];
+            Log::info('notification.rate_limited', $rateLimitCtx);
+            $eventLog->write('info', 'notification.rate_limited', $rateLimitCtx);
 
             $this->release((int) config('notifications.rate_limit.release_seconds', 1));
 
@@ -79,12 +89,15 @@ class ProcessNotificationJob implements ShouldQueue
         $notification->attempt_count = $this->attempts();
         $notification->save();
 
-        Log::info('notification.processing', [
+        $processingCtx = [
             'notification_id' => $notification->id,
-            'batch_id' => $notification->batch_id,
-            'channel' => $notification->channel,
-            'attempt' => $this->attempts(),
-        ]);
+            'batch_id'        => $notification->batch_id,
+            'channel'         => $notification->channel,
+            'attempt'         => $this->attempts(),
+            'message'         => 'Processing notification',
+        ];
+        Log::info('notification.processing', $processingCtx);
+        $eventLog->write('info', 'notification.processing', $processingCtx);
 
         $startedAt = microtime(true);
 
@@ -98,14 +111,17 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->save();
             $metrics->incrementSent();
 
-            Log::info('notification.sent', [
-                'notification_id' => $notification->id,
-                'batch_id' => $notification->batch_id,
-                'channel' => $notification->channel,
-                'attempt' => $this->attempts(),
+            $sentCtx = [
+                'notification_id'     => $notification->id,
+                'batch_id'            => $notification->batch_id,
+                'channel'             => $notification->channel,
+                'attempt'             => $this->attempts(),
                 'provider_message_id' => $providerResponse['messageId'] ?? null,
-                'latency_ms' => (int) round((microtime(true) - $startedAt) * 1000),
-            ]);
+                'latency_ms'          => (int) round((microtime(true) - $startedAt) * 1000),
+                'message'             => 'Notification sent successfully',
+            ];
+            Log::info('notification.sent', $sentCtx);
+            $eventLog->write('info', 'notification.sent', $sentCtx);
         } catch (PermanentProviderException $e) {
             $metrics->observeProviderRequest((int) round((microtime(true) - $startedAt) * 1000));
             $metrics->incrementProviderPermanentFailure();
@@ -115,13 +131,16 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->last_error = $e->getMessage();
             $notification->save();
 
-            Log::warning('notification.failed.permanent', [
+            $permFailCtx = [
                 'notification_id' => $notification->id,
-                'batch_id' => $notification->batch_id,
-                'channel' => $notification->channel,
-                'attempt' => $this->attempts(),
-                'error' => $e->getMessage(),
-            ]);
+                'batch_id'        => $notification->batch_id,
+                'channel'         => $notification->channel,
+                'attempt'         => $this->attempts(),
+                'error'           => $e->getMessage(),
+                'message'         => 'Permanent provider failure',
+            ];
+            Log::warning('notification.failed.permanent', $permFailCtx);
+            $eventLog->write('error', 'notification.failed.permanent', $permFailCtx);
 
             return;
         } catch (TransientProviderException $e) {
@@ -133,13 +152,16 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->last_error = $e->getMessage();
             $notification->save();
 
-            Log::warning('notification.failed.transient', [
+            $transFailCtx = [
                 'notification_id' => $notification->id,
-                'batch_id' => $notification->batch_id,
-                'channel' => $notification->channel,
-                'attempt' => $this->attempts(),
-                'error' => $e->getMessage(),
-            ]);
+                'batch_id'        => $notification->batch_id,
+                'channel'         => $notification->channel,
+                'attempt'         => $this->attempts(),
+                'error'           => $e->getMessage(),
+                'message'         => 'Transient failure — will retry',
+            ];
+            Log::warning('notification.failed.transient', $transFailCtx);
+            $eventLog->write('warning', 'notification.failed.transient', $transFailCtx);
 
             throw $e;
         } catch (Throwable $e) {
@@ -151,13 +173,16 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->last_error = $e->getMessage();
             $notification->save();
 
-            Log::error('notification.failed.unexpected', [
+            $unexpectedCtx = [
                 'notification_id' => $notification->id,
-                'batch_id' => $notification->batch_id,
-                'channel' => $notification->channel,
-                'attempt' => $this->attempts(),
-                'error' => $e->getMessage(),
-            ]);
+                'batch_id'        => $notification->batch_id,
+                'channel'         => $notification->channel,
+                'attempt'         => $this->attempts(),
+                'error'           => $e->getMessage(),
+                'message'         => 'Unexpected failure — will retry',
+            ];
+            Log::error('notification.failed.unexpected', $unexpectedCtx);
+            $eventLog->write('error', 'notification.failed.unexpected', $unexpectedCtx);
 
             throw $e;
         }

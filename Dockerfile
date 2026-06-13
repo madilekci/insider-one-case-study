@@ -13,7 +13,7 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 COPY . .
 
-RUN composer install --no-dev --optimize-autoloader --no-interaction --no-progress
+RUN composer install --optimize-autoloader --no-interaction --no-progress
 
 RUN mkdir -p database storage/framework/cache storage/framework/sessions storage/framework/views storage/logs \
     && touch database/database.sqlite \

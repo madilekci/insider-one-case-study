@@ -23,7 +23,7 @@ services:
       NOTIFICATION_PROVIDER_WEBHOOK_URL: ${NOTIFICATION_PROVIDER_WEBHOOK_URL:-}
       NOTIFICATION_PROVIDER_TIMEOUT_SECONDS: ${NOTIFICATION_PROVIDER_TIMEOUT_SECONDS:-10}
     volumes:
-      - app_db:/var/www/html/database
+      - .:/var/www/html
     depends_on:
       redis:
         condition: service_healthy
@@ -49,7 +49,7 @@ services:
       NOTIFICATION_PROVIDER_WEBHOOK_URL: ${NOTIFICATION_PROVIDER_WEBHOOK_URL:-}
       NOTIFICATION_PROVIDER_TIMEOUT_SECONDS: ${NOTIFICATION_PROVIDER_TIMEOUT_SECONDS:-10}
     volumes:
-      - app_db:/var/www/html/database
+      - .:/var/www/html
     depends_on:
       redis:
         condition: service_healthy
@@ -67,5 +67,3 @@ services:
       timeout: 3s
       retries: 20
 
-volumes:
-  app_db:
