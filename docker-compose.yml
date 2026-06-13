@@ -20,6 +20,8 @@ services:
       REDIS_CLIENT: phpredis
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      NOTIFICATION_PROVIDER_WEBHOOK_URL: ${NOTIFICATION_PROVIDER_WEBHOOK_URL:-}
+      NOTIFICATION_PROVIDER_TIMEOUT_SECONDS: ${NOTIFICATION_PROVIDER_TIMEOUT_SECONDS:-10}
     volumes:
       - app_db:/var/www/html/database
     depends_on:
@@ -31,7 +33,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: insider-one-worker
-    command: ["php", "artisan", "queue:work", "redis", "--queue=high,normal,low", "--sleep=1", "--tries=3", "--timeout=120"]
+    command: ["sh", "docker/start-worker.sh"]
     environment:
       APP_KEY: base64:mG9wXMjOmphs6VxA2LzFfWBhQpgxCNeWGZAdfQjdAtU=
       APP_ENV: local
@@ -44,6 +46,8 @@ services:
       REDIS_CLIENT: phpredis
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      NOTIFICATION_PROVIDER_WEBHOOK_URL: ${NOTIFICATION_PROVIDER_WEBHOOK_URL:-}
+      NOTIFICATION_PROVIDER_TIMEOUT_SECONDS: ${NOTIFICATION_PROVIDER_TIMEOUT_SECONDS:-10}
     volumes:
       - app_db:/var/www/html/database
     depends_on:

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Redis;
 use Tests\TestCase;
 
@@ -17,6 +18,15 @@ class RedisQueueIntegrationTest extends TestCase
         parent::setUp();
 
         config()->set('queue.default', 'redis');
+        config()->set('notifications.provider.webhook_url', 'https://example.test/provider');
+
+        Http::fake([
+            'https://example.test/provider' => Http::response([
+                'messageId' => 'redis-provider-msg',
+                'status' => 'accepted',
+                'timestamp' => now()->toISOString(),
+            ], 202),
+        ]);
 
         try {
             Redis::connection()->ping();

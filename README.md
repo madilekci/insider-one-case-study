@@ -44,6 +44,67 @@ Stop:
 docker compose down
 ```
 
+## Set Up The Actual Provider (webhook.site)
+
+1. Open https://webhook.site and copy your generated unique URL.
+2. Configure webhook.site response so API gets task-compliant payload:
+
+- Open your webhook page and go to Edit / Customize Response.
+- Set status code to `202`.
+- Set header `Content-Type: application/json`.
+- Set response body to:
+
+```json
+{
+	"messageId": "provider-demo-id",
+	"status": "accepted",
+	"timestamp": "{{timestamp}}"
+}
+```
+
+Without this, webhook.site may return HTML and the worker will treat it as transient failure and retry.
+3. Put your URL in `.env`:
+
+```bash
+NOTIFICATION_PROVIDER_WEBHOOK_URL=https://webhook.site/<your-uuid>
+NOTIFICATION_PROVIDER_TIMEOUT_SECONDS=10
+```
+
+4. If you run with Docker, restart so containers receive updated env values:
+
+```bash
+docker compose down
+docker compose up --build
+```
+
+5. Send a test notification:
+
+```bash
+curl -X POST http://localhost:8000/api/notifications \
+	-H "Content-Type: application/json" \
+	-d '{
+		"channel":"sms",
+		"recipient":"+905551234567",
+		"content":"Provider integration test",
+		"priority":"high"
+	}'
+```
+
+6. Verify in webhook.site UI:
+- You should see a POST request with payload fields: `to`, `channel`, `content`
+- If worker is running, notification status should move to `sent`
+
+7. Check the saved delivery result from API:
+
+```bash
+curl http://localhost:8000/api/notifications/<notification-id>
+```
+
+Look for:
+- `status: sent`
+- `provider_response.messageId`
+- `provider_response.timestamp`
+
 ## Local Run (Without Docker)
 
 Prerequisites:
@@ -58,6 +119,13 @@ Setup:
 cp .env.example .env
 php artisan key:generate
 php artisan migrate
+```
+
+Provider setup (Step 4):
+
+```bash
+# set this to your webhook.site URL
+NOTIFICATION_PROVIDER_WEBHOOK_URL=https://webhook.site/<your-uuid>
 ```
 
 Run API:
