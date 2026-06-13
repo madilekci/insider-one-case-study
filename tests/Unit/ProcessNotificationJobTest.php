@@ -26,6 +26,8 @@ class ProcessNotificationJobTest extends TestCase
 
     public function test_job_moves_queued_notification_to_sent(): void
     {
+        // Bu test provider başarılı döndüğünde queued kaydın sent'e taşındığını doğrular.
+        // Durum güncellenip provider_response ve attempt_count beklenen şekildeyse test geçer.
         Http::fake([
             'https://example.test/provider' => Http::response([
                 'messageId' => 'provider-msg-1',
@@ -57,6 +59,8 @@ class ProcessNotificationJobTest extends TestCase
 
     public function test_job_does_not_process_cancelled_notification(): void
     {
+        // Bu test cancelled durumundaki kaydın job tarafından tekrar işlenmediğini kontrol eder.
+        // Durum değişmeden cancelled kalırsa test geçer.
         $notification = Notification::create([
             'channel' => 'sms',
             'recipient' => '+905551234567',
@@ -75,6 +79,8 @@ class ProcessNotificationJobTest extends TestCase
 
     public function test_job_is_safe_when_notification_does_not_exist(): void
     {
+        // Bu test olmayan bir notification ID ile handle çağrıldığında sistemin patlamadığını doğrular.
+        // Exception atmadan akış tamamlanırsa test geçer.
         (new ProcessNotificationJob('00000000-0000-0000-0000-000000000000'))->handle(app(NotificationProviderClient::class), app(Metrics::class));
 
         $this->assertTrue(true);
@@ -82,6 +88,8 @@ class ProcessNotificationJobTest extends TestCase
 
     public function test_job_marks_failed_on_permanent_provider_error_without_throwing(): void
     {
+        // Bu test provider 4xx döndüğünde kalıcı hata olarak işaretlenmesini kontrol eder.
+        // Job exception fırlatmadan kayıt failed olursa test geçer.
         Http::fake([
             'https://example.test/provider' => Http::response([
                 'error' => 'invalid recipient',
@@ -106,6 +114,8 @@ class ProcessNotificationJobTest extends TestCase
 
     public function test_job_rethrows_transient_provider_error_and_keeps_notification_queued(): void
     {
+        // Bu test provider 5xx döndüğünde geçici hata davranışını kontrol eder.
+        // Exception yeniden fırlatılırken kayıt queued kalıyorsa retry akışı doğru, test geçer.
         Http::fake([
             'https://example.test/provider' => Http::response([
                 'error' => 'temporary issue',
@@ -134,6 +144,8 @@ class ProcessNotificationJobTest extends TestCase
 
     public function test_job_backoff_matches_retry_policy(): void
     {
+        // Bu test retry politikasının sabit değerlerini doğrular.
+        // backoff dizisi ve toplam tries değeri beklendiği gibiyse test geçer.
         $job = new ProcessNotificationJob('00000000-0000-0000-0000-000000000000');
 
         $this->assertSame([5, 30, 120], $job->backoff());
@@ -142,6 +154,8 @@ class ProcessNotificationJobTest extends TestCase
 
     public function test_job_releases_when_channel_rate_limit_is_exceeded(): void
     {
+        // Bu test kanal limiti dolduğunda job'ın provider'a gitmeden release edilmesini doğrular.
+        // HTTP çağrısı yapılmaz, kayıt queued kalır ve last_error yazılırsa test geçer.
         config()->set('notifications.rate_limit.per_second', 1);
         config()->set('notifications.rate_limit.release_seconds', 1);
 

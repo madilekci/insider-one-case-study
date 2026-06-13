@@ -21,6 +21,8 @@ class ScheduledNotificationsAndTemplatesTest extends TestCase
 
     public function test_it_lists_available_templates(): void
     {
+        // Bu test template liste endpoint'ine istek atar.
+        // 200 dönüp beklenen template anahtarı gelirse test geçer.
         $this->getJson('/api/templates')
             ->assertOk()
             ->assertJsonPath('data.0.key', 'welcome_sms');
@@ -28,6 +30,8 @@ class ScheduledNotificationsAndTemplatesTest extends TestCase
 
     public function test_it_renders_template_content_before_queueing(): void
     {
+        // Bu test template + değişkenlerle create isteği atar.
+        // İçerik doğru render edilip doğru kuyruğa dispatch edilirse test geçer.
         $response = $this->postJson('/api/notifications', [
             'channel' => 'sms',
             'recipient' => '+905551234567',
@@ -49,6 +53,8 @@ class ScheduledNotificationsAndTemplatesTest extends TestCase
 
     public function test_it_rejects_missing_template_variables(): void
     {
+        // Bu test zorunlu template değişkenlerinden biri eksik payload gönderir.
+        // 422 ve template_variables hatası dönmesi beklenir.
         $this->postJson('/api/notifications', [
             'channel' => 'sms',
             'recipient' => '+905551234567',
@@ -62,6 +68,8 @@ class ScheduledNotificationsAndTemplatesTest extends TestCase
 
     public function test_it_creates_future_notifications_as_pending(): void
     {
+        // Bu test gelecekteki scheduled_at ile bildirim oluşturur.
+        // Kayıt pending açılıp doğru kuyruğa dispatch edilirse test geçer.
         $scheduledAt = now()->addMinutes(30)->startOfSecond()->toISOString();
 
         $response = $this->postJson('/api/notifications', [

@@ -29,6 +29,8 @@ class LiveProviderIntegrationTest extends TestCase
      */
     public function test_provider_is_accessible_and_responds_with_202(): void
     {
+        // Bu test canlı provider URL'sine örnek payload gönderir.
+        // 202 döner ve JSON body gelirse bağlantı adımı başarılı kabul edilir.
         $response = Http::timeout(10)->post(
             config('notifications.provider.webhook_url'),
             [
@@ -53,6 +55,8 @@ class LiveProviderIntegrationTest extends TestCase
      */
     public function test_notification_delivered_through_live_provider(): void
     {
+        // Bu test API'den bildirim oluşturup worker ile işleterek uçtan uca akışı doğrular.
+        // Durum sent'e geçer ve provider_response alanları dolarsa test geçer.
         // Create a notification
         $response = $this->postJson('/api/notifications', [
             'channel' => 'sms',
@@ -97,6 +101,8 @@ class LiveProviderIntegrationTest extends TestCase
      */
     public function test_webhook_site_receives_correct_payload(): void
     {
+        // Bu test webhook tarafına gönderimin başarılı olduğunu dolaylı olarak doğrular.
+        // İşlem sonrası kayıt sent olursa payload formatı kabul edildi varsayımıyla test geçer.
         // Create notification with unique identifier
         $uniqueContent = 'Payload validation test ' . now()->timestamp;
 
@@ -140,6 +146,8 @@ class LiveProviderIntegrationTest extends TestCase
      */
     public function test_notification_tracks_provider_retry_attempts(): void
     {
+        // Bu test bir işlem denemesi sonrası attempt_count değerinin tutulduğunu kontrol eder.
+        // Worker bir kez çalıştıktan sonra attempt_count=1 ise test geçer.
         // Create notification
         $response = $this->postJson('/api/notifications', [
             'channel' => 'sms',

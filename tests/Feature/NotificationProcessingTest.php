@@ -14,6 +14,8 @@ class NotificationProcessingTest extends TestCase
 
     public function test_it_dispatches_single_notification_to_priority_queue(): void
     {
+        // Bu test high öncelikli tekil create isteğinin doğru kuyruğa dispatch edildiğini kontrol eder.
+        // High kuyruğuna 1 job düşüyorsa test geçer.
         Queue::fake();
 
         $this->postJson('/api/notifications', [
@@ -29,6 +31,8 @@ class NotificationProcessingTest extends TestCase
 
     public function test_it_dispatches_batch_notifications_to_separate_priority_queues(): void
     {
+        // Bu test farklı önceliklerde batch gönderir.
+        // Her öncelik kendi kuyruğuna route ediliyorsa test geçer.
         Queue::fake();
 
         $this->postJson('/api/notifications', [
@@ -62,6 +66,8 @@ class NotificationProcessingTest extends TestCase
 
     public function test_single_idempotency_header_returns_existing_notification_without_duplicate_dispatch(): void
     {
+        // Bu test aynı Idempotency-Key ile iki kez create çağrısı yapar.
+        // İkinci çağrı mevcut kaydı döndürüp yeni dispatch üretmiyorsa test geçer.
         Queue::fake();
 
         $first = $this->withHeaders([
@@ -92,6 +98,8 @@ class NotificationProcessingTest extends TestCase
 
     public function test_batch_item_idempotency_reuses_existing_record_and_dispatches_only_new_item(): void
     {
+        // Bu test batch içinde bir mevcut bir yeni idempotency item gönderir.
+        // Sadece yeni item için kayıt/job oluşup mevcut item yeniden üretilmiyorsa test geçer.
         Queue::fake();
 
         Notification::create([

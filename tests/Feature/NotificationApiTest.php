@@ -20,6 +20,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_fetches_notification_by_id(): void
     {
+        // Bu test var olan bir kaydı ID ile okuma endpoint'ine gider.
+        // 200 dönüp doğru ID ve kanal bilgisi gelirse test geçer.
         $notification = Notification::create([
             'channel' => 'push',
             'recipient' => 'device-token-1',
@@ -36,6 +38,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_creates_single_notification(): void
     {
+        // Bu test tekil bildirim create isteği atar.
+        // 201 dönmesi, response alanlarının doğru olması ve DB'de 1 kayıt oluşması beklenir.
         $response = $this->postJson('/api/notifications', [
             'channel' => 'sms',
             'recipient' => '+905551234567',
@@ -53,6 +57,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_creates_batch_and_fetches_by_batch_id(): void
     {
+        // Bu test batch create sonrası dönen batch_id ile batch sorgulama yapar.
+        // Oluşturma ve sorgulama adımları başarılıysa test geçer.
         $response = $this->postJson('/api/notifications', [
             'notifications' => [
                 [
@@ -82,6 +88,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_returns_404_for_missing_batch_id(): void
     {
+        // Bu test olmayan bir batch_id ile sorgu atar.
+        // 404 ve "Batch not found." mesajı gelirse test geçer.
         $this->getJson('/api/batches/2d0473f5-5ccb-4146-b857-112ec95a1a93')
             ->assertStatus(404)
             ->assertJsonPath('message', 'Batch not found.');
@@ -89,6 +97,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_lists_with_filters_and_cancels_when_queued(): void
     {
+        // Bu test önce filtreli liste endpoint'ini sonra queued kaydı cancel etmeyi dener.
+        // Filtre sonucu doğru kayıt dönüp cancel sonrası status cancelled olursa test geçer.
         $queued = Notification::create([
             'channel' => 'sms',
             'recipient' => '+905551234567',
@@ -117,6 +127,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_cancels_pending_notification(): void
     {
+        // Bu test pending bir bildirimin iptal edilebildiğini doğrular.
+        // Cancel çağrısı sonrası status cancelled olursa test geçer.
         $pending = Notification::create([
             'channel' => 'sms',
             'recipient' => '+905551234567',
@@ -132,6 +144,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_rejects_cancel_when_not_queued_or_pending(): void
     {
+        // Bu test sent durumundaki bir kaydı cancel etmeyi dener.
+        // İş kuralı gereği 422 ve ilgili hata mesajı dönmesi beklenir.
         $sent = Notification::create([
             'channel' => 'sms',
             'recipient' => '+905551234567',
@@ -147,6 +161,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_rejects_mixed_single_and_batch_payload(): void
     {
+        // Bu test aynı payload içinde hem single hem batch alanı göndermeyi dener.
+        // Validation 422 dönüp notifications alanında hata verirse test geçer.
         $this->postJson('/api/notifications', [
             'channel' => 'sms',
             'recipient' => '+905551234567',
@@ -164,6 +180,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_rejects_batch_larger_than_1000(): void
     {
+        // Bu test API limitini aşan (1001) batch gönderir.
+        // Validation 422 dönerek limitin korunduğunu gösterirse test geçer.
         $items = [];
 
         for ($i = 0; $i < 1001; $i++) {
@@ -182,6 +200,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_enforces_channel_content_limit(): void
     {
+        // Bu test sms kanalına izin verilenden uzun içerik gönderir.
+        // 422 ve content alanında validation hatası gelirse test geçer.
         $this->postJson('/api/notifications', [
             'channel' => 'sms',
             'recipient' => '+905551234567',
@@ -193,6 +213,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_validates_list_query_params(): void
     {
+        // Bu test geçersiz query parametreleriyle listeleme endpoint'ini çağırır.
+        // 422 ve ilgili parametrelerde hata dönmesi beklenir.
         $this->getJson('/api/notifications?status=unknown&channel=fax&per_page=500')
             ->assertStatus(422)
             ->assertJsonValidationErrors(['status', 'channel', 'per_page']);
@@ -200,6 +222,8 @@ class NotificationApiTest extends TestCase
 
     public function test_it_filters_by_date_range(): void
     {
+        // Bu test eski ve yeni kayıt üretip tarih aralığı filtresini dener.
+        // Sadece aralık içindeki kayıt dönüyorsa test geçer.
         Notification::unguarded(function (): void {
             Notification::create([
                 'id' => 'd417db84-4ecf-4e29-8780-1177f39f70a1',

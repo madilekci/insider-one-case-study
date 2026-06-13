@@ -41,6 +41,8 @@ class HighThroughputLoadTest extends TestCase
 
     public function test_api_accepts_total_burst_via_chunked_batches(): void
     {
+        // Bu test toplam yükü API limitine takılmadan (parçalı batch) gönderir.
+        // Tüm istekler başarılı olup toplam kayıt ve dispatch sayısı hedefe ulaşıyorsa test geçer.
         Queue::fake();
 
         $startedAt = microtime(true);
@@ -63,6 +65,8 @@ class HighThroughputLoadTest extends TestCase
 
     public function test_worker_drains_total_burst_with_reasonable_throughput(): void
     {
+        // Bu test queued durumundaki çok sayıda bildirimi job ile işler.
+        // Tüm kayıtlar sent'e dönüyor ve işlem süresi makul eşik altında kalıyorsa test geçer.
         $notifications = [];
 
         for ($i = 0; $i < self::BURST_NOTIFICATION_COUNT; $i++) {
@@ -117,6 +121,8 @@ class HighThroughputLoadTest extends TestCase
 
     public function test_api_handles_rapid_fire_single_requests(): void
     {
+        // Bu test API'ye kısa sürede art arda tekil create isteği yollar.
+        // Her istek 201 dönüyor, beklenen kayıt/job sayısı oluşuyor ve süre eşiği aşılmıyorsa test geçer.
         Queue::fake();
 
         $requestCount = 300;
@@ -157,6 +163,8 @@ class HighThroughputLoadTest extends TestCase
 
     public function test_api_handles_repeated_batch_bursts_sequentially(): void
     {
+        // Bu test ardışık çoklu batch create akışını dener.
+        // Her batch başarılı dönüyor, toplam kayıt/job sayısı doğruysa ve süre uygunsa test geçer.
         Queue::fake();
 
         $batchCount = 10;
@@ -186,6 +194,8 @@ class HighThroughputLoadTest extends TestCase
 
     public function test_idempotency_replay_under_load_does_not_create_duplicates(): void
     {
+        // Bu test aynı idempotency anahtarlarıyla tekrar istek atıldığında duplicate oluşmamasını doğrular.
+        // İlk dalga 201, tekrar dalgası 200 döner; toplam kayıt/job sayısı ilk dalga kadar kalıyorsa test geçer.
         Queue::fake();
 
         $requestCount = 200;

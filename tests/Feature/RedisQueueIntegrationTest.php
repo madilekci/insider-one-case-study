@@ -50,6 +50,8 @@ class RedisQueueIntegrationTest extends TestCase
 
     public function test_notification_is_pushed_to_redis_and_processed_by_worker_once(): void
     {
+        // Bu test create sonrası job'ın Redis kuyruğuna düştüğünü ve worker --once ile işlendiğini doğrular.
+        // Kuyruk azalır ve kayıt sent'e geçerse test geçer.
         $response = $this->postJson('/api/notifications', [
             'channel' => 'sms',
             'recipient' => '+905551234567',
@@ -81,6 +83,8 @@ class RedisQueueIntegrationTest extends TestCase
 
     public function test_idempotency_key_does_not_push_duplicate_redis_job(): void
     {
+        // Bu test aynı idempotency anahtarıyla iki istek atar.
+        // DB'de tek kayıt kalır ve kuyrukta tek job varsa duplicate engellenmiştir, test geçer.
         $this->withHeaders([
             'Idempotency-Key' => 'redis-idempotent-1',
         ])->postJson('/api/notifications', [
@@ -105,6 +109,8 @@ class RedisQueueIntegrationTest extends TestCase
 
     public function test_batch_items_are_pushed_to_matching_priority_queues(): void
     {
+        // Bu test farklı önceliklerde batch gönderip Redis kuyruk dağılımını kontrol eder.
+        // High/normal/low kuyruklarında beklenen adet varsa test geçer.
         $this->postJson('/api/notifications', [
             'notifications' => [
                 [
@@ -135,6 +141,8 @@ class RedisQueueIntegrationTest extends TestCase
 
     public function test_cancelled_notification_stays_cancelled_when_worker_runs(): void
     {
+        // Bu test oluşturulan kaydı önce cancel edip sonra worker çalıştırır.
+        // Worker çalışsa da kayıt cancelled durumda kalıyorsa test geçer.
         $create = $this->postJson('/api/notifications', [
             'channel' => 'sms',
             'recipient' => '+905551234222',
@@ -164,6 +172,8 @@ class RedisQueueIntegrationTest extends TestCase
 
     public function test_worker_once_processes_high_before_low_when_both_queued(): void
     {
+        // Bu test high ve low job aynı anda varken worker --once davranışını ölçer.
+        // High işlenip low kuyrukta kalıyorsa öncelik sırası doğru, test geçer.
         $high = $this->postJson('/api/notifications', [
             'channel' => 'sms',
             'recipient' => '+905551234333',

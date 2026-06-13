@@ -11,6 +11,7 @@ class ExampleTest extends TestCase
      */
     public function test_that_true_is_true(): void
     {
+        // Bu test test altyapısının çalıştığını göstermek için en temel doğrulamayı yapar.
         $this->assertTrue(true);
     }
 }

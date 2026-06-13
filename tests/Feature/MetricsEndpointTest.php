@@ -19,6 +19,8 @@ class MetricsEndpointTest extends TestCase
 
     public function test_metrics_endpoint_returns_expected_shape(): void
     {
+        // Bu test metrics endpoint'inin sözleşme/alan yapısını doğrular.
+        // Beklenen ana başlıklar ve alt alanlar geliyorsa test geçer.
         $response = $this->getJson('/metrics');
 
         $response->assertOk()
@@ -47,6 +49,8 @@ class MetricsEndpointTest extends TestCase
 
     public function test_metrics_increments_after_notification_creation(): void
     {
+        // Bu test create çağrısından sonra metrics sayaçlarının arttığını kontrol eder.
+        // created_total ve kanal bazlı sayaçlar beklenen değerlere çıkarsa test geçer.
         $this->postJson('/api/notifications', [
             'channel' => 'sms',
             'recipient' => '+905551234567',
