@@ -2,12 +2,31 @@
 
 Case study implementation for Insider One.
 
-Core scope completed so far:
+## What Is Built
+
 - Notification Management API (single + batch create, status lookup, list/filter, cancel)
 - Async queue processing with priority queues (`high`, `normal`, `low`)
 - Idempotency support (single header and batch item key)
-- Docker runtime with API + worker + Redis
+- Docker runtime: one-command startup with API + worker + Redis
 - Channel rate limiting (100 notifications/second/channel with delayed re-queue)
+- Provider integration via webhook.site with retry and error classification
+- Observability: `/metrics` endpoint + structured logs with correlation IDs
+
+## Architecture Decisions
+
+**SQLite over Postgres/MySQL** — sufficient for a case study; no infra to provision, migrations work identically.
+
+**Separate Redis queues per priority** — Laravel worker drains `high` before `normal` before `low` because of queue order in `queue:work redis --queue=high,normal,low`. Simpler and more predictable than a single queue with a priority column.
+
+**Error classification (transient vs permanent)** — 5xx/429/connection errors are retried (TransientProviderException); 4xx client errors are not (PermanentProviderException). This avoids burning retries on bad input.
+
+**Retry policy: 4 attempts with backoff [5s, 30s, 120s]** — covers momentary outages without indefinite retries.
+
+**Rate limiting via RateLimiter + job release** — jobs exceeding 100/sec/channel are re-queued with a 1-second delay instead of dropped. Enforced in the worker, not the API, to avoid blocking HTTP request handling.
+
+**Counter-based metrics in Cache** — lightweight, no Prometheus dependency needed for MVP. Redis-backed cache so counters survive restarts.
+
+**Correlation ID as middleware** — every request gets an `X-Correlation-ID` (generated if missing). It propagates to the response header and is included in all structured log entries for end-to-end traceability.
 
 ## Architecture (Current)
 
@@ -162,20 +181,33 @@ NOTIFICATION_RATE_LIMIT_PER_SECOND=100
 NOTIFICATION_RATE_LIMIT_RELEASE_SECONDS=1
 ```
 
-## Observability Metrics (Step 6-7)
+## Observability (Step 6-7)
+
+### Metrics
 
 `/metrics` returns a JSON snapshot with:
 
 - Notification counters: `created_total`, `sent_total`, `failed_total`, `retry_total`, `rate_limited_total`
+- Rates: `success_rate`, `failure_rate` (0.0–1.0, null if no processed notifications yet)
 - Per-channel counters: `created_by_channel`, `rate_limited_by_channel`
 - Provider counters: `request_total`, `transient_failure_total`, `permanent_failure_total`, `avg_latency_ms`
 - Queue depth gauges: `high`, `normal`, `low`
 
-Example:
-
 ```bash
 curl -sS http://localhost:8000/metrics | jq .
 ```
+
+### Correlation ID
+
+Every request includes an `X-Correlation-ID` response header. Pass your own or one is generated automatically:
+
+```bash
+curl -i -H "X-Correlation-ID: my-trace-123" http://localhost:8000/health
+```
+
+All structured log entries for that request include `correlation_id` alongside `notification_id`, `batch_id`, `channel`, and `attempt`.
+
+Log event names: `notification.processing`, `notification.sent`, `notification.failed.transient`, `notification.failed.permanent`, `notification.failed.unexpected`, `notification.rate_limited`.
 
 ## Example API Requests
 

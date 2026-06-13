@@ -9,6 +9,7 @@ use App\Services\NotificationProviderClient;
 use App\Services\Observability\Metrics;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
@@ -53,6 +54,13 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->save();
             $metrics->incrementRateLimited($notification->channel);
 
+            Log::info('notification.rate_limited', [
+                'notification_id' => $notification->id,
+                'batch_id' => $notification->batch_id,
+                'channel' => $notification->channel,
+                'attempt' => $this->attempts(),
+            ]);
+
             $this->release((int) config('notifications.rate_limit.release_seconds', 1));
 
             return;
@@ -61,6 +69,13 @@ class ProcessNotificationJob implements ShouldQueue
         $notification->status = Notification::STATUS_PROCESSING;
         $notification->attempt_count = $this->attempts();
         $notification->save();
+
+        Log::info('notification.processing', [
+            'notification_id' => $notification->id,
+            'batch_id' => $notification->batch_id,
+            'channel' => $notification->channel,
+            'attempt' => $this->attempts(),
+        ]);
 
         $startedAt = microtime(true);
 
@@ -73,6 +88,15 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->last_error = null;
             $notification->save();
             $metrics->incrementSent();
+
+            Log::info('notification.sent', [
+                'notification_id' => $notification->id,
+                'batch_id' => $notification->batch_id,
+                'channel' => $notification->channel,
+                'attempt' => $this->attempts(),
+                'provider_message_id' => $providerResponse['messageId'] ?? null,
+                'latency_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            ]);
         } catch (PermanentProviderException $e) {
             $metrics->observeProviderRequest((int) round((microtime(true) - $startedAt) * 1000));
             $metrics->incrementProviderPermanentFailure();
@@ -81,6 +105,14 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->status = Notification::STATUS_FAILED;
             $notification->last_error = $e->getMessage();
             $notification->save();
+
+            Log::warning('notification.failed.permanent', [
+                'notification_id' => $notification->id,
+                'batch_id' => $notification->batch_id,
+                'channel' => $notification->channel,
+                'attempt' => $this->attempts(),
+                'error' => $e->getMessage(),
+            ]);
 
             return;
         } catch (TransientProviderException $e) {
@@ -92,6 +124,14 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->last_error = $e->getMessage();
             $notification->save();
 
+            Log::warning('notification.failed.transient', [
+                'notification_id' => $notification->id,
+                'batch_id' => $notification->batch_id,
+                'channel' => $notification->channel,
+                'attempt' => $this->attempts(),
+                'error' => $e->getMessage(),
+            ]);
+
             throw $e;
         } catch (Throwable $e) {
             $metrics->observeProviderRequest((int) round((microtime(true) - $startedAt) * 1000));
@@ -101,6 +141,14 @@ class ProcessNotificationJob implements ShouldQueue
             $notification->status = Notification::STATUS_QUEUED;
             $notification->last_error = $e->getMessage();
             $notification->save();
+
+            Log::error('notification.failed.unexpected', [
+                'notification_id' => $notification->id,
+                'batch_id' => $notification->batch_id,
+                'channel' => $notification->channel,
+                'attempt' => $this->attempts(),
+                'error' => $e->getMessage(),
+            ]);
 
             throw $e;
         }

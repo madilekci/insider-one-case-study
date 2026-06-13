@@ -78,14 +78,20 @@ class Metrics
         $latencyCount = $this->getInt(self::KEY_PROVIDER_LATENCY_COUNT);
         $latencySumMs = $this->getInt(self::KEY_PROVIDER_LATENCY_SUM_MS);
 
+        $sentTotal = $this->getInt(self::KEY_SENT_TOTAL);
+        $failedTotal = $this->getInt(self::KEY_FAILED_TOTAL);
+        $processedTotal = $sentTotal + $failedTotal;
+
         return [
             'notifications' => [
                 'created_total' => $this->getInt(self::KEY_CREATED_TOTAL),
                 'cancelled_total' => $this->getInt(self::KEY_CANCELLED_TOTAL),
-                'sent_total' => $this->getInt(self::KEY_SENT_TOTAL),
-                'failed_total' => $this->getInt(self::KEY_FAILED_TOTAL),
+                'sent_total' => $sentTotal,
+                'failed_total' => $failedTotal,
                 'retry_total' => $this->getInt(self::KEY_RETRY_TOTAL),
                 'rate_limited_total' => $this->getInt(self::KEY_RATE_LIMITED_TOTAL),
+                'success_rate' => $processedTotal > 0 ? round($sentTotal / $processedTotal, 4) : null,
+                'failure_rate' => $processedTotal > 0 ? round($failedTotal / $processedTotal, 4) : null,
                 'created_by_channel' => $this->channelMap('created'),
                 'rate_limited_by_channel' => $this->channelMap('rate_limited'),
             ],

@@ -30,6 +30,8 @@ class MetricsEndpointTest extends TestCase
                     'failed_total',
                     'retry_total',
                     'rate_limited_total',
+                    'success_rate',
+                    'failure_rate',
                     'created_by_channel' => ['sms', 'email', 'push'],
                     'rate_limited_by_channel' => ['sms', 'email', 'push'],
                 ],
