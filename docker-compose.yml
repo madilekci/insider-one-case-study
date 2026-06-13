@@ -1,0 +1,67 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: insider-one-app
+    command: ["sh", "docker/start-app.sh"]
+    ports:
+      - "8000:8000"
+    environment:
+      APP_KEY: base64:mG9wXMjOmphs6VxA2LzFfWBhQpgxCNeWGZAdfQjdAtU=
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8000
+      DB_CONNECTION: sqlite
+      DB_DATABASE: database/database.sqlite
+      QUEUE_CONNECTION: redis
+      CACHE_STORE: file
+      SESSION_DRIVER: file
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    volumes:
+      - app_db:/var/www/html/database
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: insider-one-worker
+    command: ["php", "artisan", "queue:work", "redis", "--queue=high,normal,low", "--sleep=1", "--tries=3", "--timeout=120"]
+    environment:
+      APP_KEY: base64:mG9wXMjOmphs6VxA2LzFfWBhQpgxCNeWGZAdfQjdAtU=
+      APP_ENV: local
+      APP_DEBUG: "true"
+      DB_CONNECTION: sqlite
+      DB_DATABASE: database/database.sqlite
+      QUEUE_CONNECTION: redis
+      CACHE_STORE: file
+      SESSION_DRIVER: file
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    volumes:
+      - app_db:/var/www/html/database
+    depends_on:
+      redis:
+        condition: service_healthy
+      app:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    container_name: insider-one-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  app_db:
