@@ -14,6 +14,8 @@ class RedisQueueIntegrationTest extends TestCase
 {
     use RefreshDatabase;
 
+    private $redis;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -29,23 +31,72 @@ class RedisQueueIntegrationTest extends TestCase
             ], 202),
         ]);
 
-        try {
-            Redis::connection()->ping();
-        } catch (\Throwable $e) {
-            $this->markTestSkipped('Redis is not reachable for integration tests: '.$e->getMessage());
-        }
+        $this->configureReachableRedisOrSkip();
 
         // Clear rate limiter and metrics state between test runs to avoid cross-test interference
         Cache::flush();
 
-        Redis::del('queues:high', 'queues:normal', 'queues:low');
+        $this->redis()->del('queues:high', 'queues:normal', 'queues:low');
     }
 
     protected function tearDown(): void
     {
-        Redis::del('queues:high', 'queues:normal', 'queues:low');
+        if ($this->redis !== null) {
+            $this->redis()->del('queues:high', 'queues:normal', 'queues:low');
+        }
 
         parent::tearDown();
+    }
+
+    private function configureReachableRedisOrSkip(): void
+    {
+        $candidateHosts = array_unique(array_filter([
+            (string) config('database.redis.default.host'),
+            '127.0.0.1',
+            'localhost',
+        ]));
+
+        $lastError = null;
+
+        foreach ($candidateHosts as $host) {
+            config()->set('database.redis.default.host', $host);
+            config()->set('database.redis.cache.host', $host);
+
+            try {
+                Redis::purge('default');
+            } catch (\Throwable) {
+                // Ignore purge failures and still attempt a ping with fresh config.
+            }
+
+            try {
+                $probeKey = 'tests:redis_probe:'.uniqid();
+                $redis = Redis::connection();
+                $redis->set($probeKey, '1');
+                $value = $redis->get($probeKey);
+                $redis->del($probeKey);
+
+                if ((string) $value !== '1') {
+                    throw new \RuntimeException('Redis probe read/write mismatch.');
+                }
+
+                $this->redis = $redis;
+
+                return;
+            } catch (\Throwable $e) {
+                $lastError = $e->getMessage();
+            }
+        }
+
+        $this->markTestSkipped('Redis is not reachable for integration tests: '.($lastError ?? 'unknown error'));
+    }
+
+    private function redis()
+    {
+        if ($this->redis === null) {
+            $this->redis = Redis::connection();
+        }
+
+        return $this->redis;
     }
 
     public function test_notification_is_pushed_to_redis_and_processed_by_worker_once(): void
@@ -63,7 +114,7 @@ class RedisQueueIntegrationTest extends TestCase
 
         $notificationId = $response->json('notification.id');
 
-        $this->assertSame(1, Redis::llen('queues:high'));
+        $this->assertSame(1, $this->redis()->llen('queues:high'));
 
         Artisan::call('queue:work', [
             'connection' => 'redis',
@@ -73,7 +124,7 @@ class RedisQueueIntegrationTest extends TestCase
             '--sleep' => 0,
         ]);
 
-        $this->assertSame(0, Redis::llen('queues:high'));
+        $this->assertSame(0, $this->redis()->llen('queues:high'));
 
         $this->assertDatabaseHas('notifications', [
             'id' => $notificationId,
@@ -104,7 +155,7 @@ class RedisQueueIntegrationTest extends TestCase
         ])->assertOk();
 
         $this->assertDatabaseCount('notifications', 1);
-        $this->assertSame(1, Redis::llen('queues:normal'));
+        $this->assertSame(1, $this->redis()->llen('queues:normal'));
     }
 
     public function test_batch_items_are_pushed_to_matching_priority_queues(): void
@@ -134,9 +185,9 @@ class RedisQueueIntegrationTest extends TestCase
             ],
         ])->assertCreated();
 
-        $this->assertSame(1, Redis::llen('queues:high'));
-        $this->assertSame(1, Redis::llen('queues:normal'));
-        $this->assertSame(1, Redis::llen('queues:low'));
+        $this->assertSame(1, $this->redis()->llen('queues:high'));
+        $this->assertSame(1, $this->redis()->llen('queues:normal'));
+        $this->assertSame(1, $this->redis()->llen('queues:low'));
     }
 
     public function test_cancelled_notification_stays_cancelled_when_worker_runs(): void
@@ -191,8 +242,8 @@ class RedisQueueIntegrationTest extends TestCase
         $highId = $high->json('notification.id');
         $lowId = $low->json('notification.id');
 
-        $this->assertSame(1, Redis::llen('queues:high'));
-        $this->assertSame(1, Redis::llen('queues:low'));
+        $this->assertSame(1, $this->redis()->llen('queues:high'));
+        $this->assertSame(1, $this->redis()->llen('queues:low'));
 
         Artisan::call('queue:work', [
             'connection' => 'redis',
@@ -212,7 +263,7 @@ class RedisQueueIntegrationTest extends TestCase
             'status' => Notification::STATUS_QUEUED,
         ]);
 
-        $this->assertSame(0, Redis::llen('queues:high'));
-        $this->assertSame(1, Redis::llen('queues:low'));
+        $this->assertSame(0, $this->redis()->llen('queues:high'));
+        $this->assertSame(1, $this->redis()->llen('queues:low'));
     }
 }

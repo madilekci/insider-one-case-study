@@ -140,8 +140,11 @@ class DashboardController extends Controller
             'smoke'         => 'HealthEndpointTest|MetricsEndpointTest',
             'notifications' => 'NotificationApiTest|NotificationProcessingTest',
             'queue'         => 'RedisQueueIntegrationTest',
-            'load'          => 'HighThroughputLoadTest',
             'templates'     => 'ScheduledNotificationsAndTemplatesTest',
+            'provider'      => 'LiveProviderIntegrationTest',
+            'unit'          => 'ExampleTest|ProcessNotificationJobTest',
+            'load'          => 'HighThroughputLoadTest',
+            'all'           => null,
         ];
 
         if (! array_key_exists($group, $filterMap)) {
@@ -162,21 +165,29 @@ class DashboardController extends Controller
         // backgrounding issues. The script runs phpunit synchronously and writes
         // a sentinel marker when done; the web process returns immediately after
         // launching it via nohup.
+        $argv = [$phpBin, $phpUnit, '--configuration', $config, '--no-coverage', '--colors=never'];
+        if ($filter !== null) {
+            $argv[] = '--filter';
+            $argv[] = $filter;
+        }
+
         $args = array_map(
             static fn (string $v) => var_export($v, true),
-            [$phpBin, $phpUnit, '--configuration', $config, '--no-coverage', '--colors=never', '--filter', $filter],
+            $argv,
         );
 
         $argsLiteral   = implode(', ', $args);
-        $loadEnvLine   = $group === 'load' ? "putenv('RUN_LOAD_TESTS=true');" : '';
+        $loadEnvLine   = in_array($group, ['load', 'all'], true) ? "\$forcedEnv['RUN_LOAD_TESTS'] = 'true';" : '';
         $logFileExport = var_export($logFile, true);
         $markerExport  = var_export($marker, true);
         $basePathExport = var_export($basePath, true);
+        $redisClientExport = var_export((string) config('database.redis.client', 'phpredis'), true);
+        $redisHostExport = var_export((string) config('database.redis.default.host', '127.0.0.1'), true);
+        $redisPortExport = var_export((string) config('database.redis.default.port', '6379'), true);
 
         $script = <<<PHP
 <?php
 chdir($basePathExport);
-$loadEnvLine
 \$logFile  = $logFileExport;
 \$marker   = $markerExport;
 \$forcedEnv = [
@@ -190,11 +201,18 @@ $loadEnvLine
     'DB_URL' => '',
     'MAIL_MAILER' => 'array',
     'QUEUE_CONNECTION' => 'sync',
+    'REDIS_CLIENT' => $redisClientExport,
+    'REDIS_HOST' => $redisHostExport,
+    'REDIS_PORT' => $redisPortExport,
     'SESSION_DRIVER' => 'array',
     'PULSE_ENABLED' => 'false',
     'TELESCOPE_ENABLED' => 'false',
     'NIGHTWATCH_ENABLED' => 'false',
 ];
+
+$loadEnvLine
+
+\$procEnv = array_merge(\$_ENV, \$_SERVER, \$forcedEnv);
 
 foreach (\$forcedEnv as \$envKey => \$envValue) {
     putenv("{\$envKey}=\{\$envValue}");
@@ -208,7 +226,7 @@ foreach (\$forcedEnv as \$envKey => \$envValue) {
     [0 => ['pipe', 'r'], 1 => \$logHandle, 2 => \$logHandle],
     \$pipes,
     null,
-    \$forcedEnv,
+    \$procEnv,
 );
 fclose(\$logHandle);
 \$exitCode = proc_close(\$proc);

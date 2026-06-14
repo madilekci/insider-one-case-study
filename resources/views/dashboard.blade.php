@@ -224,7 +224,10 @@
                     <option value="notifications">Notification API + Processing</option>
                     <option value="queue">Queue Integration</option>
                     <option value="templates">Scheduled + Templates</option>
+                    <option value="provider">Live Provider Integration</option>
+                    <option value="unit">Unit Tests</option>
                     <option value="load">⚡ Load Test (slow)</option>
+                    <option value="all">🧪 All Tests (slowest)</option>
                 </select>
             </div>
             <button @click="runTests()"
@@ -235,9 +238,9 @@
             </button>
         </div>
 
-        <template x-if="testGroup === 'load'">
+        <template x-if="testGroup === 'load' || testGroup === 'all'">
             <div class="text-xs text-yellow-400 bg-yellow-900/30 border border-yellow-700 rounded px-3 py-2">
-                ⚠ Load tests are resource-intensive and may take several minutes.
+                ⚠ This selection is resource-intensive and may take several minutes.
             </div>
         </template>
 
