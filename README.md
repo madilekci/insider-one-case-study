@@ -1,5 +1,8 @@
 Although it wasn't listed in the assessment requirements, I implemented a **local development dashboard (UI)**. You can access it at http://localhost:8000/dashboard
 
+<img width="1728" height="958" alt="image" src="https://github.com/user-attachments/assets/535e0bf7-4c5c-4b02-9a67-68dfed1c1c5c" />
+
+
 # Event-Driven Notification System
 
 Case study implementation for Insider One.
@@ -153,6 +156,17 @@ Access:
 ```text
 http://localhost:8000/dashboard
 ```
+
+<img width="1243" height="251" alt="image" src="https://github.com/user-attachments/assets/5122b01e-46ac-468f-84dc-afec468924a5" />
+
+<img width="1243" height="228" alt="image" src="https://github.com/user-attachments/assets/82d5e16d-4d06-45dd-844d-4e275512c3eb" />
+
+<img width="1243" height="167" alt="image" src="https://github.com/user-attachments/assets/c6152d79-d050-41dc-a2d9-c1ba905ca402" />
+
+<img width="616" height="372" alt="image" src="https://github.com/user-attachments/assets/e1d8334a-420d-4e72-b083-a4e23da1581b" />
+
+<img width="616" height="372" alt="image" src="https://github.com/user-attachments/assets/027e614b-1acc-4a31-9bce-9d13ab5c5a00" />
+
 
 Dashboard capabilities:
 - **Metrics cards** (created, sent, failed, retries, rate-limited, success/failure rates, average provider latency)
