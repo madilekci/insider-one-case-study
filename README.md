@@ -159,10 +159,12 @@ Dashboard capabilities:
 - **Live event stream** with filters (correlation_id, notification_id, event, level)
 - **Latest notifications table** with status and channel filters
 - **Background test runner** with live output polling
+- **Test runner groups**: smoke, notifications, queue, templates, provider, unit, load, and **all**
 - **Demo traffic generator** (15-120 seconds)
 - **Demo data cleanup** (demo notifications, event log, operational counters)
 
 **Note**: dashboard routes are local-only and return 403 outside local environment.
+`load` and `all` groups are intentionally heavier and may take noticeably longer to complete.
 
 ## Observability
 
@@ -296,6 +298,8 @@ RUN_LOAD_TESTS=true php artisan test --filter=HighThroughputLoadTest
 
 Notes:
 - **Load tests are disabled by default** to keep feedback fast.
+- **Redis integration tests require Redis to be reachable** during local runs. Either keep Docker Redis running (for example `docker compose up -d redis`) or run a local Redis instance on `127.0.0.1:6379`.
+- If Redis is not reachable, Redis integration tests are skipped by design.
 - Coverage includes API behavior, validation, idempotency, scheduling, template rendering, queue dispatch, and job state transitions.
 
 ## API Documentation
