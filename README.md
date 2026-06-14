@@ -1,3 +1,5 @@
+Although it wasn't listed in the assessment requirements, I implemented a **local development dashboard (UI)**. You can access it at http://localhost:8000/dashboard
+
 # Event-Driven Notification System
 
 Case study implementation for Insider One.
